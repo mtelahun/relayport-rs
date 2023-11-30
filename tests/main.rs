@@ -1,9 +1,9 @@
-use relayport_rs::{command::RelayCommand, relay_tcp::RelaySocket};
+use relayport_rs::{command::RelayCommand, RelaySocket};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{
-        broadcast::{self, Receiver, Sender},
+        broadcast::{self, Receiver},
         oneshot,
     },
 };
@@ -79,15 +79,13 @@ async fn spawn_server(
     });
 }
 
-async fn spawn_relay(tx: Sender<RelayCommand>) {
+async fn spawn_relay(rx: Receiver<RelayCommand>) {
     debug!("START spawn_relay()");
     let listen_addr = "127.0.0.1:10099";
     let relay_addr = "127.0.0.1:20100";
     let relay = RelaySocket::build()
         .set_so_reuseaddr(true)
-        .expect("failed to set SO_REUSEADDR")
         .set_tcp_nodelay(true)
-        .expect("failed to set TCP_NODELAY")
         .bind(listen_addr)
         .expect(&format!("failed to bind to {}", listen_addr))
         .listen()
@@ -97,7 +95,7 @@ async fn spawn_relay(tx: Sender<RelayCommand>) {
         ));
     let _ = tokio::task::spawn(async move {
         relay
-            .accept_and_relay(relay_addr, &tx)
+            .accept_and_relay(relay_addr, &rx)
             .await
             .expect("failed to start relay")
     });
@@ -127,13 +125,13 @@ async fn spawn_client(buf: BufWrapper) {
 #[tokio::test]
 async fn client_to_server() {
     tracing_subscriber::fmt::init();
-    let (tx, _rx) = broadcast::channel(1);
+    let (tx, rx) = broadcast::channel(1);
     let (output_sender, output_receiver) = oneshot::channel::<BufWrapper>();
     let mut buf_client = BufWrapper::new();
     buf_client.write(56u8, 100);
     let buf_server = BufWrapper::new();
     spawn_server(buf_server, tx.subscribe(), output_sender).await;
-    spawn_relay(tx.clone()).await;
+    spawn_relay(rx).await;
     spawn_client(buf_client.clone()).await;
 
     let buf_server = output_receiver
