@@ -1,4 +1,4 @@
-//! The abstractions that allow relaying of TCP communications
+//! Abstractions that relay TCP communication
 
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -18,7 +18,7 @@ const MTU: usize = 1518;
 #[derive(Debug)]
 pub struct RelaySocket {}
 
-/// Builder abstraction for composing a relay.
+/// Builder abstraction for composing a TCP relay.
 #[derive(Copy, Clone, Debug)]
 pub struct RelaySocketBuilder(RelayInner);
 
@@ -286,7 +286,6 @@ impl RelayListener {
     ///         .bind("127.0.0.1:10443")?
     ///         .listen()?;
     ///
-    ///
     ///     // spawn a task to handle the acceptance and dispatch of a relay
     ///     let _ = tokio::task::spawn(async move {
     ///         listener
@@ -296,7 +295,7 @@ impl RelayListener {
     ///     });
     ///
     ///     // Do other work
-    ///     tokio::time::sleep(std::time::Duration::from_millis(120));
+    ///     tokio::time::sleep(std::time::Duration::from_secs(60));
     ///
     ///     // send the task a shutdown command so it exits cleanly
     ///     tx.send(RelayCommand::Shutdown)?;

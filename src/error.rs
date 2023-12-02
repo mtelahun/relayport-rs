@@ -1,7 +1,6 @@
 //! Errors returned by the library
 
 use std::net::AddrParseError;
-
 use tokio::sync::broadcast::error::RecvError;
 
 /// The methods of this library may return any of the errors defined here.
