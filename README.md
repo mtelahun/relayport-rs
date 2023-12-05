@@ -31,7 +31,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
     // spawn a task to handle the acceptance and dispatch of a relay connection
     let _ = tokio::task::spawn(async move {
         relay
-            .accept_and_relay("127.0.0.1:9090", &rx)
+            .accept_and_relay("127.0.0.1:80", &rx)
             .await
             .expect("failed to start relay")
     });
