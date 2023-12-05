@@ -38,7 +38,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
     // Wait for Ctrl-C to send the shutdown command
     let mut sigint = signal(SignalKind::interrupt())?;
     match sigint.recv().await {
-        Some(()) => { tx.send(RelayCommand::Shutdown)?; },
+        Some(()) => tx.send(RelayCommand::Shutdown)?,
         None => {},
     }
 
