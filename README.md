@@ -68,20 +68,5 @@ To use this library in your own package add the following to your Cargo.toml:
 
 ```
 [dependencies]
-relayport_rs = "0.1.0"
+relayport_rs = "0.2.0"
 ```
-
-
-Build
------
-From a terminal:
-1. Clone this repository
-
-```git clone https://github.com/mtelahun/sppg.git```
-
-2. Change into the cloned directory and type:
-
-```cargo run --release```
-
-Installation
-------------
