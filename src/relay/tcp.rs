@@ -287,7 +287,7 @@ impl RelayListener {
     ///     // spawn a task to handle the acceptance and dispatch of a relay
     ///     let _ = tokio::task::spawn(async move {
     ///         listener
-    ///             .accept_and_relay("127.0.0.1:80", &rx)
+    ///             .serve("127.0.0.1:80", &rx)
     ///             .await
     ///             .expect("failed to start relay")
     ///     });
@@ -302,7 +302,7 @@ impl RelayListener {
     /// # }
     ///
     /// ```
-    pub async fn accept_and_relay(
+    pub async fn serve(
         &self,
         peer: &str,
         cancel: &Receiver<RelayCommand>,
@@ -343,10 +343,10 @@ impl RelayListener {
             .await?;
         let handle = tokio::spawn(async move {
             let (mut client_r, mut client_w) = client_stream.split();
-            let (mut relay_r, mut relay_w) = relay.0.split();
+            let (mut remote_r, mut remote_w) = relay.0.split();
             let (xfer_client, xfer_relay) = tokio::join!(
-                relay_inner(&mut client_r, &mut relay_w, cancel.resubscribe()),
-                relay_inner(&mut relay_r, &mut client_w, cancel),
+                relay_inner(&mut client_r, &mut remote_w, cancel.resubscribe()),
+                relay_inner(&mut remote_r, &mut client_w, cancel),
             );
             match xfer_client {
                 Ok(count) => debug!("{count} bytes relayed from client to remote"),

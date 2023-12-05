@@ -3,7 +3,7 @@
 use std::net::AddrParseError;
 use tokio::sync::broadcast::error::RecvError;
 
-/// The methods of this library may return any of the errors defined here.
+/// relayport-rs may return any of these errors.
 #[derive(Debug)]
 pub enum RelayPortError {
     InternalCommunicationError(RecvError),
