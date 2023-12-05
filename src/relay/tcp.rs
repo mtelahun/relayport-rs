@@ -3,16 +3,14 @@
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::broadcast::Receiver;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use crate::command::RelayCommand;
 use crate::RelayPortError;
-
-const MTU: usize = 1518;
 
 /// Abstraction for initiating the relay builder.
 #[derive(Debug)]
@@ -320,7 +318,7 @@ impl RelayListener {
                 result = cancel.recv() => {match result {
                     Ok(cmd) => match cmd {
                         RelayCommand::Shutdown => {
-                            debug!("received shutdown relay command");
+                            debug!("received relay command: shutdown");
                             break
                         },
                     },
@@ -377,37 +375,33 @@ async fn relay_inner(
 ) -> Result<usize, RelayPortError> {
     let _from_addr = read_sock.peer_addr().unwrap();
     let _to_addr = write_sock.peer_addr().unwrap();
-    let mut buf = vec![0u8; MTU];
-    let mut relay_bytes = 0;
-    loop {
-        let read_bytes;
-        tokio::select! {
-            biased;
-            result = read_sock.read(buf.as_mut()) => {
+    let copy_reader_to_writer = tokio::io::copy(read_sock, write_sock);
+    let await_shutdown = rx.recv();
+    let mut read_bytes = Ok(0);
+    tokio::select! {
+        biased;
+            result = copy_reader_to_writer => {
                 read_bytes = result.or_else(|e| match e.kind() {
                     ErrorKind::ConnectionReset => Ok(0),
                     _ => Err(e),
                 })
             }
-            result = rx.recv() => { match result {
+            result = await_shutdown => { match result {
                 Ok(cmd) => match cmd {
                     RelayCommand::Shutdown => {
                         debug!("received shutdown relay command");
-                        break
                     },
                 },
                 Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
             }}
-        }
-        match read_bytes {
-            Ok(bytes) => {
-                write_sock.write_all(&buf[0..bytes]).await?;
-                relay_bytes += bytes;
-                trace!(bytes, total_bytes = relay_bytes);
-            }
-            Err(e) => return Err(RelayPortError::IoError(e)),
-        }
     }
 
-    Ok(relay_bytes)
+    match read_bytes {
+        Ok(bytes) => {
+            debug!("Transferred {bytes} bytes");
+            let _ = write_sock.shutdown().await;
+            Ok(bytes as usize)
+        }
+        Err(e) => Err(RelayPortError::IoError(e)),
+    }
 }
