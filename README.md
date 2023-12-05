@@ -10,9 +10,10 @@ of proxies are the resources available on the system on which it is run. This li
 for its runtime. A simple program to proxy web traffic to a server might look like this:
 ```
 use std::error::Error;
-use tokio::sync::broadcast;
 use relayport_rs::RelaySocket;
 use relayport_rs::command::RelayCommand;
+use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::broadcast;
 
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn Error>> {
@@ -21,21 +22,25 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 
     // build a relay with a listener TCP socket
     let relay = RelaySocket::build()
-        .set_so_reuseaddr(true)?
-        .set_tcp_nodelay(true)?
-        .bind("0.0.0.0:8080)?
+        .set_so_reuseaddr(true)
+        .set_tcp_nodelay(true)
+        .bind("127.0.0.1:8080")?
         .listen()?;
 
     // spawn a task to handle the acceptance and dispatch of a relay connection
     let _ = tokio::task::spawn(async move {
         relay
-            .accept_and_relay("www.example.com:80", &rx)
+            .accept_and_relay("127.0.0.1:9090", &rx)
             .await
             .expect("failed to start relay")
     });
 
-    // send the task a shutdown command so it exits cleanly
-    tx.send(RelayCommand::Shutdown)?;
+    // Wait for Ctrl-C to send the shutdown command
+    let mut sigint = signal(SignalKind::interrupt())?;
+    match sigint.recv().await {
+        Some(()) => tx.send(RelayCommand::Shutdown)?,
+        None => {},
+    }
 
     Ok(())
 }
