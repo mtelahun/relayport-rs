@@ -1,6 +1,7 @@
 # relayport-rs
 Fast and easy abstraction for proxying TCP ports.
 
+![Rust](https://github.com/mtelahun/relayport-rs/actions/workflows/rust.yml/badge.svg)
 [![codecov](https://codecov.io/gh/mtelahun/relayport-rs/branch/main/graph/badge.svg?token=A1P9I5E2LU)](https://codecov.io/gh/mtelahun/relayport-rs)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
 
