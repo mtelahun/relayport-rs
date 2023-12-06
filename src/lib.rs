@@ -44,6 +44,34 @@
 //!    Ok(())
 //! }
 //! ```
+//!
+//! This is the same program again, but we don't care about catching a SIGINT:
+//! ```no_run
+//! use std::error::Error;
+//! use tokio::sync::broadcast;
+//! use relayport_rs::command::RelayCommand;
+//! use relayport_rs::RelayPortError;
+//! use relayport_rs::RelaySocket;
+//!
+//! #[tokio::main]
+//! pub async fn main() -> Result<(), RelayPortError> {
+//!     // The relay expects a broadcast channel on which to listen for shutdown commands
+//!     let (tx, rx) = broadcast::channel(16);
+//!
+//!     // build a relay with a listener TCP socket
+//!     let relay = RelaySocket::build()
+//!         .set_so_reuseaddr(true)
+//!         .set_tcp_nodelay(true)
+//!         .bind("0.0.0.0:8080")?
+//!         .listen()?;
+//!
+//!     // spawn a task to handle the acceptance and dispatch of a relay connection
+//!     relay
+//!         .serve("127.0.0.1:80", &rx)
+//!         .await
+//!
+//! }
+//! ```
 
 pub mod command;
 pub mod error;

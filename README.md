@@ -14,20 +14,20 @@ To use this library in your own package add the following to your Cargo.toml:
 
 ```
 [dependencies]
-relayport_rs = "0.3.0"
+relayport_rs = "{{ CARGO_PKG_VERSION }}"
 ```
 
 ## Example
 A simple program to proxy web traffic to a server might look like this:
 ```
 use std::error::Error;
-use relayport_rs::RelaySocket;
 use relayport_rs::command::RelayCommand;
-use tokio::signal::unix::{signal, SignalKind};
+use relayport_rs::RelayPortError;
+use relayport_rs::RelaySocket;
 use tokio::sync::broadcast;
 
 #[tokio::main]
-pub async fn main() -> Result<(), Box<dyn Error>> {
+pub async fn main() -> Result<(), RelayPortError> {
     // The relay expects a broadcast channel on which to listen for shutdown commands
     let (tx, rx) = broadcast::channel(16);
 
@@ -38,22 +38,10 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
         .bind("127.0.0.1:8080")?
         .listen()?;
 
-    // spawn a task to handle the acceptance and dispatch of a relay connection
-    let _ = tokio::task::spawn(async move {
-        relay
-            .serve("127.0.0.1:80", &rx)
-            .await
-            .expect("failed to start relay")
-    });
-
-    // Wait for Ctrl-C to send the shutdown command
-    let mut sigint = signal(SignalKind::interrupt())?;
-    match sigint.recv().await {
-        Some(()) => { tx.send(RelayCommand::Shutdown)?; {} },
-        None => {},
-    }
-
-    Ok(())
+    // this will never return unless it encounters an error
+    relay
+        .serve("127.0.0.1:80", &rx)
+        .await
 }
 ```
 
