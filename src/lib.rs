@@ -6,11 +6,12 @@
 //!
 //! # Example
 //! A simple program to proxy web traffic to a server might look like this:
-//! ```
+//! ```no_run
 //! use std::error::Error;
 //! use tokio::sync::broadcast;
 //! use relayport_rs::RelaySocket;
 //! use relayport_rs::command::RelayCommand;
+//! use tokio::signal::unix::{signal, SignalKind};
 //!
 //! #[tokio::main]
 //! pub async fn main() -> Result<(), Box<dyn Error>> {
@@ -27,15 +28,20 @@
 //!     // spawn a task to handle the acceptance and dispatch of a relay connection
 //!     let _ = tokio::task::spawn(async move {
 //!         relay
-//!             .accept_and_relay("127.0.0.1:80", &rx)
+//!             .serve("127.0.0.1:80", &rx)
 //!             .await
 //!             .expect("failed to start relay")
 //!     });
 //!
-//!     // send the task a shutdown command so it exits cleanly
-//!     tx.send(RelayCommand::Shutdown)?;
 //!
-//!     Ok(())
+//!    // Wait for Ctrl-C to send the shutdown command
+//!    let mut sigint = signal(SignalKind::interrupt())?;
+//!    match sigint.recv().await {
+//!        Some(()) => { tx.send(RelayCommand::Shutdown)?; {} },
+//!        None => {},
+//!    }
+//!
+//!    Ok(())
 //! }
 //! ```
 
