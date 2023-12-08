@@ -29,8 +29,7 @@ pub struct BoundRelaySocket(TcpSocket);
 pub struct RelayListener(TcpListener);
 
 /// Abstraction representing a TCP stream.
-/// The stream represnts a TCP stream either a from a RelayListener that has accepted an
-/// incomming connection or a BoundRelaySocket connected to a remote peer.
+/// Represents a TCP stream from a BoundRelaySocket connected to a remote peer.
 #[derive(Debug)]
 pub struct RelayStream(TcpStream);
 

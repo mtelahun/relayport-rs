@@ -15,7 +15,7 @@ To use this library in your own package add the following to your Cargo.toml:
 
 ```
 [dependencies]
-relayport_rs = "{{ CARGO_PKG_VERSION }}"
+relayport_rs = "0.3.0"
 ```
 
 ## Example

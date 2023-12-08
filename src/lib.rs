@@ -78,4 +78,5 @@ pub mod error;
 pub mod relay;
 pub use command::RelayCommand;
 pub use error::RelayPortError;
-pub use relay::tcp::{RelaySocket, RelayStream};
+pub use relay::tcp::{RelaySocket as RelayTcpSocket, RelayStream as RelayTcpStream};
+pub use relay::udp::RelaySocket as RelayUdpSocket;
