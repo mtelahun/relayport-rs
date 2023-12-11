@@ -1,4 +1,4 @@
-//! Abstractions that relay TCP communication
+//! Abstractions that relay TCP ports
 
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -47,9 +47,9 @@ impl RelaySocket {
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayTcpSocket;
     ///
-    /// let builder = RelaySocket::build();
+    /// let builder = RelayTcpSocket::build();
     ///
     /// // configure builder
     /// ```
@@ -69,9 +69,9 @@ impl RelaySocketBuilder {
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayTcpSocket;
     ///
-    /// let bound_relay = RelaySocket::build()
+    /// let bound_relay = RelayTcpSocket::build()
     ///     .bind("127.0.0.1:10443")
     ///     .unwrap();
     ///
@@ -95,11 +95,11 @@ impl RelaySocketBuilder {
     ///
     /// # Example
     /// ```no_run
-    /// use relayport_rs::{RelayPortError, RelaySocket, RelayStream};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket, RelayTcpStream};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let relay_stream = RelaySocket::build()
+    ///     let relay_stream = RelayTcpSocket::build()
     ///         .connect("127.0.0.1:443", None)
     ///         .await?;
     ///
@@ -146,13 +146,13 @@ impl RelaySocketBuilder {
     /// Change the SO_REUSEADDR option on the TCP socket. If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelaySocketBuilder] obeject with the configuration set according to the reuseaddr argument.
+    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the reuseaddr argument.
     ///
     /// ```
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let mut builder = RelaySocket::build();
+    ///     let mut builder = RelayTcpSocket::build();
     ///     builder.set_so_reuseaddr(true);
     ///
     ///     assert_eq!(builder.so_reuseaddr(), true);
@@ -170,13 +170,13 @@ impl RelaySocketBuilder {
     /// Change the TCP_NODELAY option on the TCP socket. If nodelay is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelaySocketBuilder] obeject with the configuration set according to the nodelay argument.
+    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the nodelay argument.
     ///
     /// ```
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let mut builder = RelaySocket::build();
+    ///     let mut builder = RelayTcpSocket::build();
     ///     builder.set_tcp_nodelay(true);
     ///
     ///     assert_eq!(builder.tcp_nodelay(), true);
@@ -231,11 +231,11 @@ impl BoundRelaySocket {
     ///
     /// # Example
     /// ```no_run
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let listener = RelaySocket::build()
+    ///     let listener = RelayTcpSocket::build()
     ///         .bind("127.0.0.1:10443")?
     ///         .listen()?;
     ///
@@ -272,14 +272,14 @@ impl RelayListener {
     /// ```no_run
     /// # use std::error::Error;
     /// use tokio::sync::broadcast;
-    /// use relayport_rs::{RelayCommand, RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayCommand, RelayPortError, RelayTcpSocket};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), Box<dyn Error>>  {
     ///     // The relay expects a broadcast channel on which to listen for shutdown commands
     ///     let (tx, rx) = broadcast::channel(16);
     ///
-    ///     let listener = RelaySocket::build()
+    ///     let listener = RelayTcpSocket::build()
     ///         .bind("127.0.0.1:10443")?
     ///         .listen()?;
     ///

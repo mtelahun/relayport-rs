@@ -106,7 +106,7 @@ async fn udp_server_to_client() {
     buf_write.write(56u8, 100);
     let buf_read = BufWrapper::new();
     let (client, server) =
-        spawn_all_udp2("127.0.0.1:30099", "127.0.0.1:30100", rx.resubscribe()).await;
+        spawn_all_udp2("127.0.0.1:32099", "127.0.0.1:32100", rx.resubscribe()).await;
 
     server
         .spawn(buf_read, rx.resubscribe(), server_sender)

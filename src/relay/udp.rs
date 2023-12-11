@@ -1,4 +1,4 @@
-//! Abstractions that relay TCP communication
+//! Abstractions that relay UDP ports
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -13,24 +13,23 @@ use tracing::debug;
 use crate::command::RelayCommand;
 use crate::RelayPortError;
 
-/// Maximum packet size (default MTU on most systems)
-const MAX_PKT_SIZE: usize = 1518;
+/// Maximum UDP buffer size
+const MAX_PKT_SIZE: usize = 10240;
 
 /// Abstraction for initiating the relay builder.
 #[derive(Debug)]
 pub struct RelaySocket {}
 
-/// Builder abstraction for composing a TCP relay.
+/// Builder abstraction for composing a UDP relay.
 #[derive(Copy, Clone, Debug)]
 pub struct RelaySocketBuilder(RelayInner);
 
 /// Abstraction containing a socket bound to a local address.
 #[derive(Debug)]
 pub struct BoundRelaySocket {
-    socket: UdpRelaySocket,
-    client_map: Arc<RwLock<HashMap<SocketAddr, UdpRelaySocket>>>,
-    peer_map_by_client_addr: Arc<RwLock<HashMap<SocketAddr, UdpRelaySocket>>>,
-    peer_map_by_port: Arc<RwLock<HashMap<u16, UdpRelaySocket>>>,
+    socket: InnerUdpSocket,
+    client_map: Arc<RwLock<HashMap<SocketAddr, InnerUdpSocket>>>,
+    peer_map_by_client_addr: Arc<RwLock<HashMap<SocketAddr, InnerUdpSocket>>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -39,7 +38,7 @@ struct RelayInner {
 }
 
 #[derive(Clone, Debug)]
-struct UdpRelaySocket(Arc<UdpSocket>);
+struct InnerUdpSocket(Arc<UdpSocket>);
 
 impl RelaySocket {
     /// Obtain a builder object to begin composing the relay socket.
@@ -49,9 +48,9 @@ impl RelaySocket {
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayUdpSocket;
     ///
-    /// let builder = RelaySocket::build();
+    /// let builder = RelayUdpSocket::build();
     ///
     /// // configure builder
     /// ```
@@ -63,19 +62,26 @@ impl RelaySocket {
 }
 
 impl RelaySocketBuilder {
-    /// Binds a TCP socket to addr.
-    /// The addr argument must be string slice that can be converted into a local addresss and port. This
-    /// method returns [BoundRelaySocket] wrapped in a [Result]. If the operation fails for any reason the
-    /// Err() value will contain the reason for the failure.
+    /// Binds a UDP socket to addr.
+    /// The addr argument must be a string slice that can be converted into a local address and port.
+    /// # Returns
+    /// This method returns a [BoundRelaySocket] wrapped in a [Result]. If the operation fails for
+    /// any reason the Err() value will contain the reason for the failure.
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayUdpSocket;
+    /// # use relayport_rs::RelayPortError;
     ///
-    /// let bound_relay = RelaySocket::build()
-    ///     .bind("127.0.0.1:10443")
-    ///     .unwrap();
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), RelayPortError> {
     ///
+    ///     let bound_relay = RelayUdpSocket::build()
+    ///        .bind("127.0.0.1:10443")
+    ///       .await?;
+    ///
+    /// #   Ok(())
+    /// # }
     /// // listen on the bound address
     /// ```
     pub async fn bind(self, addr: &str) -> Result<BoundRelaySocket, RelayPortError> {
@@ -88,25 +94,25 @@ impl RelaySocketBuilder {
         let socket = self.create_bound_socket(addr)?;
 
         Ok(BoundRelaySocket {
-            socket: UdpRelaySocket::new(socket),
-            client_map: Arc::new(RwLock::new(HashMap::<SocketAddr, UdpRelaySocket>::new())),
+            socket: InnerUdpSocket::new(socket),
+            client_map: Arc::new(RwLock::new(HashMap::<SocketAddr, InnerUdpSocket>::new())),
             peer_map_by_client_addr: Arc::new(RwLock::new(
-                HashMap::<SocketAddr, UdpRelaySocket>::new(),
+                HashMap::<SocketAddr, InnerUdpSocket>::new(),
             )),
-            peer_map_by_port: Arc::new(RwLock::new(HashMap::<u16, UdpRelaySocket>::new())),
         })
     }
 
-    /// Change the SO_REUSEADDR option on the TCP socket. If reuseaddr is `true` the option will
+    /// Change the SO_REUSEADDR option on the UDP socket.
+    /// If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
     /// A [RelaySocketBuilder] object configured according to the reuseaddr argument.
     ///
     /// ```
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayUdpSocket};
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let mut builder = RelaySocket::build();
+    ///     let mut builder = RelayUdpSocket::build();
     ///     builder.set_so_reuseaddr(true);
     ///
     ///     assert_eq!(builder.so_reuseaddr(), true);
@@ -121,7 +127,7 @@ impl RelaySocketBuilder {
         self
     }
 
-    /// Get the builder configuration for setting SO_REUSEADDR on the TCP socket.
+    /// Get the builder configuration for setting SO_REUSEADDR on the UDP socket.
     pub fn so_reuseaddr(&self) -> bool {
         self.0.so_reuseaddr
     }
@@ -151,28 +157,14 @@ impl RelaySocketBuilder {
 }
 
 impl BoundRelaySocket {
-    /// Connects a TCP socket to a target peer denoted by addr. The addr
+    /// Connects a UDP socket to a client peer denoted by addr. The addr
     /// argument must be a string slice that can be converted to a [`SocketAddr`] object. The
     /// bind_addr argument is an Option containing a string slice that specifies the
     /// local address the socket should bind to. If it is None the method will bind
     /// to a random local address.
     /// # Returns
-    /// On success a [RelayStream] is returned. Otherwise a RelayPortError error is returned.
+    /// On success the unit type () is returned. Otherwise a RelayPortError error is returned.
     ///
-    /// # Example
-    /// ```no_run
-    /// use relayport_rs::{RelayPortError, RelaySocket, RelayStream};
-    ///
-    /// # #[tokio::main]
-    /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let relay_stream = RelaySocket::build()
-    ///         .connect("127.0.0.1:443", None)
-    ///         .await?;
-    ///
-    /// #     Ok(())
-    /// # }
-    ///
-    /// ```
     async fn connect_to_client(
         &self,
         addr: &SocketAddr,
@@ -194,45 +186,38 @@ impl BoundRelaySocket {
                     .create_bound_socket(&any_addr)?;
             }
             socket.connect(addr).await?;
-            let socket = UdpRelaySocket::new(socket);
+            let socket = InnerUdpSocket::new(socket);
             client_map.insert(*addr, socket.clone());
         }
 
         Ok(())
     }
 
-    // async fn connect_to_remote(&self, addr: &str, client_addr: &SocketAddr) -> Result<(), RelayPortError> {
-    //     let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    //     socket.connect(addr).await?;
-    //     let socket = UdpRelaySocket::new(socket);
-    //     let local_addr = socket.0.local_addr()?;
-    //     self.peer_map_by_client_addr.insert(*client_addr, socket.clone());
-    //     self.peer_map_by_port.insert(local_addr.port(), socket);
-
-    //     Ok(())
-    // }
-
-    /// Same as connect() but the caller provide the peer address as a SocketAddr.
-    async fn connect_to_remote_addr(
+    /// Connects a UDP socket to the remote peer, denoted by addr, to which we are relaying traffic.
+    /// The addr argument must be a string slice that can be converted to a [`SocketAddr`]
+    /// object. The bind_addr argument is an Option containing a string slice that specifies the
+    /// local address the socket should bind to. If it is None the method will bind
+    /// to a random local address.
+    /// # Returns
+    /// On success the unit type () is returned. Otherwise a RelayPortError error is returned.
+    ///
+    async fn connect_to_remote(
         &self,
         addr: &SocketAddr,
         client_addr: &SocketAddr,
     ) -> Result<(), RelayPortError> {
         let mut peer_map_by_client_addr = self.peer_map_by_client_addr.write().await;
         if !peer_map_by_client_addr.contains_key(client_addr) {
-            let mut peer_map_by_port = self.peer_map_by_port.write().await;
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
             socket.connect(addr).await?;
-            let socket = UdpRelaySocket::new(socket);
-            let local_addr = socket.0.local_addr()?;
+            let socket = InnerUdpSocket::new(socket);
             peer_map_by_client_addr.insert(*client_addr, socket.clone());
-            peer_map_by_port.insert(local_addr.port(), socket);
         }
 
         Ok(())
     }
 
-    /// Start relaying incomming TCP traffic to the remote peer.
+    /// Start relaying incomming UDP traffic to the remote peer.
     ///
     /// Wait for a connection to come in and begin relaying traffic from
     /// the client to the remote peer and vice versa. After an incomming connection is
@@ -242,7 +227,7 @@ impl BoundRelaySocket {
     /// [tokio::sync::broadcast] chanel and passing the receiver half to this method. The
     /// chanel can be used by the caller to send [RelayCommand] objects to the spawned task.
     /// Currently, the only command supported by the library is a shutdown command to instruct
-    /// the task to close the TCP socket and exit cleanly.
+    /// the task to exit cleanly.
     ///
     /// # Returns
     /// This method will not return unless a [RelayCommand::Shutdown] is sent by the caller or
@@ -255,16 +240,17 @@ impl BoundRelaySocket {
     /// ```no_run
     /// # use std::error::Error;
     /// use tokio::sync::broadcast;
-    /// use relayport_rs::{RelayCommand, RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayCommand, RelayPortError, RelayUdpSocket};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), Box<dyn Error>>  {
     ///     // The relay expects a broadcast channel on which to listen for shutdown commands
     ///     let (tx, rx) = broadcast::channel(16);
     ///
-    ///     let listener = RelaySocket::build()
-    ///         .bind("127.0.0.1:10443")?
-    ///         .listen()?;
+    ///     let listener = RelayUdpSocket::build()
+    ///         .set_so_reuseaddr(true)
+    ///         .bind("127.0.0.1:10443")
+    ///         .await?;
     ///
     ///     // spawn a task to handle the acceptance and dispatch of a relay
     ///     let _ = tokio::task::spawn(async move {
@@ -296,7 +282,9 @@ impl BoundRelaySocket {
             let mut buf = [0u8; MAX_PKT_SIZE];
             let (len, client_addr) = self.socket.0.recv_from(&mut buf).await?;
             debug!("received data from {}", client_addr);
-            let remote_socket = self.peer_socket_by_client(&remote_addr, &client_addr).await;
+            let remote_socket = self
+                .remote_socket_by_client(&remote_addr, &client_addr)
+                .await;
             let client_socket = self.client_socket_by_addr(&client_addr, &my_addr).await;
             tokio::select! {
                 biased;
@@ -316,18 +304,23 @@ impl BoundRelaySocket {
         Ok(())
     }
 
-    async fn peer_socket_by_client(
+    /// Obtain a pre-existing socket to a remote peer or create a new one.
+    ///
+    /// If it has *NOT* already seen the remote [addr] connected to from [client_addr] it will
+    /// connect a new UDP socket to [addr], indexed by [client_addr], and add it to its global
+    /// list of sockets.
+    async fn remote_socket_by_client(
         &self,
         addr: &SocketAddr,
         client_addr: &SocketAddr,
-    ) -> UdpRelaySocket {
+    ) -> InnerUdpSocket {
         {
             let peer_map = self.peer_map_by_client_addr.read().await;
             if let Some(peer) = peer_map.get(client_addr) {
                 return peer.clone();
             }
         }
-        self.connect_to_remote_addr(addr, client_addr)
+        self.connect_to_remote(addr, client_addr)
             .await
             .unwrap_or_else(|_| {
                 panic!("failed to connect to remote peer on behalf of {client_addr}")
@@ -341,7 +334,7 @@ impl BoundRelaySocket {
         &self,
         addr: &SocketAddr,
         bind_addr: &SocketAddr,
-    ) -> UdpRelaySocket {
+    ) -> InnerUdpSocket {
         {
             let client_map = self.client_map.read().await;
             if let Some(client) = client_map.get(addr) {
@@ -358,8 +351,8 @@ impl BoundRelaySocket {
 
     async fn process_connection(
         &self,
-        client: &UdpRelaySocket,
-        remote: &UdpRelaySocket,
+        client: &InnerUdpSocket,
+        remote: &InnerUdpSocket,
         cancel: Receiver<RelayCommand>,
         buf: [u8; MAX_PKT_SIZE],
         len: usize,
@@ -383,7 +376,7 @@ impl BoundRelaySocket {
     }
 }
 
-impl UdpRelaySocket {
+impl InnerUdpSocket {
     pub fn new(socket: UdpSocket) -> Self {
         Self(Arc::new(socket))
     }
@@ -391,8 +384,8 @@ impl UdpRelaySocket {
 
 #[tracing::instrument(level = "debug", skip_all, err, ret, fields(from_addr, to_addr))]
 async fn relay_inner(
-    read_sock: &UdpRelaySocket,
-    write_sock: &UdpRelaySocket,
+    read_sock: &InnerUdpSocket,
+    write_sock: &InnerUdpSocket,
     mut rx: Receiver<RelayCommand>,
     buf: &[u8],
     len: usize,
@@ -401,7 +394,7 @@ async fn relay_inner(
     let to_addr = write_sock.0.peer_addr().unwrap();
     if len != 0 {
         let _ = write_sock.0.send(&buf[0..len]).await?;
-        debug!("wrote initial udp packet from {from_addr} to {to_addr}");
+        debug!("wrote initial udp packet: {from_addr} -> {to_addr}");
     }
 
     let mut xfer_bytes = 0;
@@ -445,7 +438,7 @@ async fn relay_inner(
 
     match read_bytes {
         Ok(bytes) => {
-            debug!("Transferred {bytes} bytes");
+            debug!("Transferred {bytes} bytes: {from_addr} -> {to_addr}");
             Ok(bytes)
         }
         Err(e) => Err(RelayPortError::IoError(e)),
