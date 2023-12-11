@@ -313,7 +313,7 @@ impl RelayListener {
             debug!("accepted connection from {}", client_addr);
             tokio::select! {
                 biased;
-                _ = self.process_connection(client_stream, relay_addr, cancel.resubscribe()) => { continue }
+                _ = self.spawn_relay(client_stream, relay_addr, cancel.resubscribe()) => { continue }
                 result = cancel.recv() => {match result {
                     Ok(cmd) => match cmd {
                         RelayCommand::Shutdown => {
@@ -329,7 +329,7 @@ impl RelayListener {
         Ok(())
     }
 
-    async fn process_connection(
+    async fn spawn_relay(
         &self,
         mut client_stream: TcpStream,
         relay_addr: SocketAddr,
@@ -344,8 +344,8 @@ impl RelayListener {
             let (mut client_r, mut client_w) = client_stream.split();
             let (mut remote_r, mut remote_w) = relay.0.split();
             let (xfer_client, xfer_relay) = tokio::join!(
-                relay_inner(&mut client_r, &mut remote_w, cancel.resubscribe()),
-                relay_inner(&mut remote_r, &mut client_w, cancel),
+                single_direction_relay(&mut client_r, &mut remote_w, cancel.resubscribe()),
+                single_direction_relay(&mut remote_r, &mut client_w, cancel),
             );
             match xfer_client {
                 Ok(count) => debug!("{count} bytes relayed from client to remote"),
@@ -367,7 +367,7 @@ impl RelayListener {
 }
 
 #[tracing::instrument(level = "debug", skip_all, err, ret, fields(_from_addr, _to_addr))]
-async fn relay_inner(
+async fn single_direction_relay(
     read_sock: &mut ReadHalf<'_>,
     write_sock: &mut WriteHalf<'_>,
     mut rx: Receiver<RelayCommand>,
