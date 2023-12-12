@@ -30,7 +30,7 @@ impl TestTcpClient {
         self,
         op: TestOp,
         write_buf: BufWrapper,
-        mut rx: Receiver<RelayCommand>,
+        mut command: Receiver<RelayCommand>,
         output: Sender<BufWrapper>,
     ) {
         println!("START Test TCP Client -> {}: spawn()", self.remote);
@@ -58,7 +58,7 @@ impl TestTcpClient {
                             _ => { println!("failed to read from tcp stream: {}", e); Err(e) }
                         }).expect("Server: failed to read from socket");
                     },
-                    _ = rx.recv() => { println!("Server: recieved cancel signal"); break; }
+                    _ = command.recv() => { println!("Server: recieved cancel signal"); break; }
                 }
 
                 if count == 0 {
@@ -87,7 +87,7 @@ impl TestUdpClient {
         &self,
         op: TestOp,
         write_buf: BufWrapper,
-        mut rx: Receiver<RelayCommand>,
+        mut command: Receiver<RelayCommand>,
         output: Sender<BufWrapper>,
     ) {
         println!("START UDP Client {}: spawn()", self.remote);
@@ -119,7 +119,7 @@ impl TestUdpClient {
                             _ => { println!("failed to read from tcp stream: {}", e); Err(e) }
                         }).expect("Server: failed to read from socket");
                     },
-                    _ = rx.recv() => { println!("Server: recieved cancel signal"); break; }
+                    _ = command.recv() => { println!("Server: recieved cancel signal"); break; }
                 }
 
                 if count == 0 {

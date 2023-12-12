@@ -228,7 +228,7 @@ impl BoundRelaySocket {
             let client_socket = self.get_client_socket(&client_addr, &my_addr).await;
             tokio::select! {
                 biased;
-                _ = self.spawn_relay(&client_socket, &remote_socket, cancel.resubscribe(), buf, len) => { continue }
+                _ = self.spawn_bidirectional_relay(&client_socket, &remote_socket, cancel.resubscribe(), buf, len) => { continue }
                 result = cancel.recv() => {match result {
                     Ok(cmd) => match cmd {
                         RelayCommand::Shutdown => {
@@ -281,7 +281,7 @@ impl BoundRelaySocket {
             .unwrap_or_else(|_| panic!("failed to bind to {bind_addr} on behalf of client {addr}"))
     }
 
-    async fn spawn_relay(
+    async fn spawn_bidirectional_relay(
         &self,
         client: &InnerUdpSocket,
         remote: &InnerUdpSocket,
@@ -380,28 +380,28 @@ impl InnerUdpSocket {
 
 #[tracing::instrument(level = "debug", skip_all, err, ret, fields(from_addr, to_addr))]
 async fn single_direction_relay(
-    read_sock: &InnerUdpSocket,
-    write_sock: &InnerUdpSocket,
+    src: &InnerUdpSocket,
+    dst: &InnerUdpSocket,
     mut rx: Receiver<RelayCommand>,
     buf: &[u8],
     len: usize,
 ) -> Result<usize, RelayPortError> {
-    let from_addr = read_sock.0.peer_addr().unwrap();
-    let to_addr = write_sock.0.peer_addr().unwrap();
+    let from_addr = src.0.peer_addr().unwrap();
+    let to_addr = dst.0.peer_addr().unwrap();
     if len != 0 {
-        let _ = write_sock.0.send(&buf[0..len]).await?;
+        let _ = dst.0.send(&buf[0..len]).await?;
         debug!("wrote initial udp packet: {from_addr} -> {to_addr}");
     }
 
     let mut xfer_bytes = 0;
     let mut buf = [0u8; MAX_PKT_SIZE];
     let copy_reader_to_writer = async move {
-        while let Ok(len) = read_sock.0.recv(&mut buf).await {
+        while let Ok(len) = src.0.recv(&mut buf).await {
             debug!("received {len} bytes from {from_addr}");
             if len == 0 {
                 break;
             }
-            let result = write_sock.0.send(&buf[0..len]).await;
+            let result = dst.0.send(&buf[0..len]).await;
             if result.is_err() {
                 let e = result.err().unwrap();
                 eprintln!("failed to send packet to {to_addr}: {e}");

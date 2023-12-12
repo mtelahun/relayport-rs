@@ -313,7 +313,7 @@ impl RelayListener {
             debug!("accepted connection from {}", client_addr);
             tokio::select! {
                 biased;
-                _ = self.spawn_relay(client_stream, relay_addr, cancel.resubscribe()) => { continue }
+                _ = self.spawn_bidirectional_relay(client_stream, relay_addr, cancel.resubscribe()) => { continue }
                 result = cancel.recv() => {match result {
                     Ok(cmd) => match cmd {
                         RelayCommand::Shutdown => {
@@ -329,7 +329,7 @@ impl RelayListener {
         Ok(())
     }
 
-    async fn spawn_relay(
+    async fn spawn_bidirectional_relay(
         &self,
         mut client_stream: TcpStream,
         relay_addr: SocketAddr,
@@ -368,13 +368,13 @@ impl RelayListener {
 
 #[tracing::instrument(level = "debug", skip_all, err, ret, fields(_from_addr, _to_addr))]
 async fn single_direction_relay(
-    read_sock: &mut ReadHalf<'_>,
-    write_sock: &mut WriteHalf<'_>,
+    src: &mut ReadHalf<'_>,
+    dst: &mut WriteHalf<'_>,
     mut rx: Receiver<RelayCommand>,
 ) -> Result<usize, RelayPortError> {
-    let _from_addr = read_sock.peer_addr().unwrap();
-    let _to_addr = write_sock.peer_addr().unwrap();
-    let copy_reader_to_writer = tokio::io::copy(read_sock, write_sock);
+    let _from_addr = src.peer_addr().unwrap();
+    let _to_addr = dst.peer_addr().unwrap();
+    let copy_reader_to_writer = tokio::io::copy(src, dst);
     let await_shutdown = rx.recv();
     let mut read_bytes = Ok(0);
     tokio::select! {
@@ -398,7 +398,7 @@ async fn single_direction_relay(
     match read_bytes {
         Ok(bytes) => {
             debug!("Transferred {bytes} bytes");
-            let _ = write_sock.shutdown().await;
+            let _ = dst.shutdown().await;
             Ok(bytes as usize)
         }
         Err(e) => Err(RelayPortError::IoError(e)),
