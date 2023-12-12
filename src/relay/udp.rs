@@ -68,7 +68,10 @@ impl RelaySocket {
 
 impl RelaySocketBuilder {
     /// Binds a UDP socket to addr.
+    ///
     /// The addr argument must be a string slice that can be converted into a local address and port.
+    /// Unlike its [RelayTcpSock] counterpart this method is asynchronous.
+    ///
     /// # Returns
     /// This method returns a [BoundRelaySocket] wrapped in a [Result]. If the operation fails for
     /// any reason the Err() value will contain the reason for the failure.
@@ -195,7 +198,7 @@ impl BoundRelaySocket {
     ///     // spawn a task to handle the acceptance and dispatch of a relay
     ///     let _ = tokio::task::spawn(async move {
     ///         listener
-    ///             .serve("127.0.0.1:80", &rx)
+    ///             .run("127.0.0.1:80", &rx)
     ///             .await
     ///             .expect("failed to start relay")
     ///     });
@@ -210,7 +213,7 @@ impl BoundRelaySocket {
     /// # }
     ///
     /// ```
-    pub async fn serve(
+    pub async fn run(
         &self,
         remote: &str,
         command: &Receiver<RelayCommand>,

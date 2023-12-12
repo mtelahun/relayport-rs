@@ -31,7 +31,7 @@ impl RelayTcp {
             ));
         let _ = tokio::task::spawn(async move {
             relay
-                .serve(&relay_addr, &rx)
+                .run(&relay_addr, &rx)
                 .await
                 .expect("failed to start relay")
         });
@@ -63,7 +63,7 @@ impl RelayUdp {
             .expect(&format!("failed to bind address: {}", listen_addr));
         let _ = tokio::task::spawn(async move {
             relay
-                .serve(&relay_addr, &rx)
+                .run(&relay_addr, &rx)
                 .await
                 .expect("failed to start relay")
         });
