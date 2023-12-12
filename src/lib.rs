@@ -28,7 +28,7 @@
 //!     // spawn a task to handle the acceptance and dispatch of a relay connection
 //!     let _ = tokio::task::spawn(async move {
 //!         relay
-//!             .serve("127.0.0.1:80", &rx)
+//!             .run("127.0.0.1:80", &rx)
 //!             .await
 //!             .expect("failed to start relay")
 //!     });
@@ -67,9 +67,48 @@
 //!
 //!     // spawn a task to handle the acceptance and dispatch of a relay connection
 //!     relay
-//!         .serve("127.0.0.1:80", &rx)
+//!         .run("127.0.0.1:80", &rx)
 //!         .await
 //!
+//! }
+//! ```
+//!
+//! This program relays UDP DNS transactions to CloudFlare's DNS service:
+//! ```no_run
+//! use std::error::Error;
+//! use tokio::sync::broadcast;
+//! use relayport_rs::RelayUdpSocket;
+//! use relayport_rs::command::RelayCommand;
+//! use tokio::signal::unix::{signal, SignalKind};
+//!
+//! #[tokio::main]
+//! pub async fn main() -> Result<(), Box<dyn Error>> {
+//!     // The relay expects a broadcast channel on which to listen for shutdown commands
+//!     let (tx, rx) = broadcast::channel(16);
+//!
+//!     // build a relay with a listener TCP socket
+//!     let relay = RelayUdpSocket::build()
+//!         .set_so_reuseaddr(true)
+//!         .bind("0.0.0.0:55353")
+//!         .await?;
+//!
+//!     // spawn a task to handle the acceptance and dispatch of a relay connection
+//!     let _ = tokio::task::spawn(async move {
+//!         relay
+//!             .run("1.1.1.1:53", &rx)
+//!             .await
+//!             .expect("failed to start relay")
+//!     });
+//!
+//!
+//!    // Wait for Ctrl-C to send the shutdown command
+//!    let mut sigint = signal(SignalKind::interrupt())?;
+//!    match sigint.recv().await {
+//!        Some(()) => { tx.send(RelayCommand::Shutdown)?; {} },
+//!        None => {},
+//!    }
+//!
+//!    Ok(())
 //! }
 //! ```
 

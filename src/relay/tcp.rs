@@ -63,8 +63,12 @@ impl RelaySocket {
 
 impl RelaySocketBuilder {
     /// Binds a TCP socket to addr.
-    /// The addr argument must be string slice that can be converted into a local addresss and port. This
-    /// method returns [BoundRelaySocket] wrapped in a [Result]. If the operation fails for any reason the
+    ///
+    /// The addr argument must be string slice that can be converted into a local addresss and port. Unlike
+    /// its [RelayUdpSocket] counterpart this method is synchronous.
+    ///
+    /// # Returns
+    /// This method returns a [BoundRelaySocket] wrapped in a [Result]. If the operation fails for any reason the
     /// Err() value will contain the reason for the failure.
     ///
     /// # Example
@@ -74,8 +78,6 @@ impl RelaySocketBuilder {
     /// let bound_relay = RelayTcpSocket::build()
     ///     .bind("127.0.0.1:10443")
     ///     .unwrap();
-    ///
-    /// // listen on the bound address
     /// ```
     pub fn bind(self, addr: &str) -> Result<BoundRelaySocket, RelayPortError> {
         let addr = self.parse_address(addr)?;
@@ -286,7 +288,7 @@ impl RelayListener {
     ///     // spawn a task to handle the acceptance and dispatch of a relay
     ///     let _ = tokio::task::spawn(async move {
     ///         listener
-    ///             .serve("127.0.0.1:80", &rx)
+    ///             .run("127.0.0.1:80", &rx)
     ///             .await
     ///             .expect("failed to start relay")
     ///     });
@@ -301,7 +303,7 @@ impl RelayListener {
     /// # }
     ///
     /// ```
-    pub async fn serve(
+    pub async fn run(
         &self,
         peer: &str,
         cancel: &Receiver<RelayCommand>,
