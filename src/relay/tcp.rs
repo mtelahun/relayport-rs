@@ -1,4 +1,4 @@
-//! Abstractions that relay TCP communication
+//! Abstractions that relay TCP ports
 
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -29,8 +29,7 @@ pub struct BoundRelaySocket(TcpSocket);
 pub struct RelayListener(TcpListener);
 
 /// Abstraction representing a TCP stream.
-/// The stream represnts a TCP stream either a from a RelayListener that has accepted an
-/// incomming connection or a BoundRelaySocket connected to a remote peer.
+/// Represents a TCP stream from a BoundRelaySocket connected to a remote peer.
 #[derive(Debug)]
 pub struct RelayStream(TcpStream);
 
@@ -48,9 +47,9 @@ impl RelaySocket {
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayTcpSocket;
     ///
-    /// let builder = RelaySocket::build();
+    /// let builder = RelayTcpSocket::build();
     ///
     /// // configure builder
     /// ```
@@ -70,9 +69,9 @@ impl RelaySocketBuilder {
     ///
     /// # Example
     /// ```
-    /// use relayport_rs::RelaySocket;
+    /// use relayport_rs::RelayTcpSocket;
     ///
-    /// let bound_relay = RelaySocket::build()
+    /// let bound_relay = RelayTcpSocket::build()
     ///     .bind("127.0.0.1:10443")
     ///     .unwrap();
     ///
@@ -96,11 +95,11 @@ impl RelaySocketBuilder {
     ///
     /// # Example
     /// ```no_run
-    /// use relayport_rs::{RelayPortError, RelaySocket, RelayStream};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket, RelayTcpStream};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let relay_stream = RelaySocket::build()
+    ///     let relay_stream = RelayTcpSocket::build()
     ///         .connect("127.0.0.1:443", None)
     ///         .await?;
     ///
@@ -147,13 +146,13 @@ impl RelaySocketBuilder {
     /// Change the SO_REUSEADDR option on the TCP socket. If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelaySocketBuilder] obeject with the configuration set according to the reuseaddr argument.
+    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the reuseaddr argument.
     ///
     /// ```
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let mut builder = RelaySocket::build();
+    ///     let mut builder = RelayTcpSocket::build();
     ///     builder.set_so_reuseaddr(true);
     ///
     ///     assert_eq!(builder.so_reuseaddr(), true);
@@ -171,13 +170,13 @@ impl RelaySocketBuilder {
     /// Change the TCP_NODELAY option on the TCP socket. If nodelay is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelaySocketBuilder] obeject with the configuration set according to the nodelay argument.
+    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the nodelay argument.
     ///
     /// ```
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let mut builder = RelaySocket::build();
+    ///     let mut builder = RelayTcpSocket::build();
     ///     builder.set_tcp_nodelay(true);
     ///
     ///     assert_eq!(builder.tcp_nodelay(), true);
@@ -232,11 +231,11 @@ impl BoundRelaySocket {
     ///
     /// # Example
     /// ```no_run
-    /// use relayport_rs::{RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayPortError, RelayTcpSocket};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), RelayPortError>  {
-    ///     let listener = RelaySocket::build()
+    ///     let listener = RelayTcpSocket::build()
     ///         .bind("127.0.0.1:10443")?
     ///         .listen()?;
     ///
@@ -273,14 +272,14 @@ impl RelayListener {
     /// ```no_run
     /// # use std::error::Error;
     /// use tokio::sync::broadcast;
-    /// use relayport_rs::{RelayCommand, RelayPortError, RelaySocket};
+    /// use relayport_rs::{RelayCommand, RelayPortError, RelayTcpSocket};
     ///
     /// # #[tokio::main]
     /// # pub async fn main() -> Result<(), Box<dyn Error>>  {
     ///     // The relay expects a broadcast channel on which to listen for shutdown commands
     ///     let (tx, rx) = broadcast::channel(16);
     ///
-    ///     let listener = RelaySocket::build()
+    ///     let listener = RelayTcpSocket::build()
     ///         .bind("127.0.0.1:10443")?
     ///         .listen()?;
     ///
@@ -314,7 +313,7 @@ impl RelayListener {
             debug!("accepted connection from {}", client_addr);
             tokio::select! {
                 biased;
-                _ = self.process_connection(client_stream, relay_addr, cancel.resubscribe()) => { continue }
+                _ = self.spawn_bidirectional_relay(client_stream, relay_addr, cancel.resubscribe()) => { continue }
                 result = cancel.recv() => {match result {
                     Ok(cmd) => match cmd {
                         RelayCommand::Shutdown => {
@@ -330,7 +329,7 @@ impl RelayListener {
         Ok(())
     }
 
-    async fn process_connection(
+    async fn spawn_bidirectional_relay(
         &self,
         mut client_stream: TcpStream,
         relay_addr: SocketAddr,
@@ -345,8 +344,8 @@ impl RelayListener {
             let (mut client_r, mut client_w) = client_stream.split();
             let (mut remote_r, mut remote_w) = relay.0.split();
             let (xfer_client, xfer_relay) = tokio::join!(
-                relay_inner(&mut client_r, &mut remote_w, cancel.resubscribe()),
-                relay_inner(&mut remote_r, &mut client_w, cancel),
+                single_direction_relay(&mut client_r, &mut remote_w, cancel.resubscribe()),
+                single_direction_relay(&mut remote_r, &mut client_w, cancel),
             );
             match xfer_client {
                 Ok(count) => debug!("{count} bytes relayed from client to remote"),
@@ -368,14 +367,14 @@ impl RelayListener {
 }
 
 #[tracing::instrument(level = "debug", skip_all, err, ret, fields(_from_addr, _to_addr))]
-async fn relay_inner(
-    read_sock: &mut ReadHalf<'_>,
-    write_sock: &mut WriteHalf<'_>,
+async fn single_direction_relay(
+    src: &mut ReadHalf<'_>,
+    dst: &mut WriteHalf<'_>,
     mut rx: Receiver<RelayCommand>,
 ) -> Result<usize, RelayPortError> {
-    let _from_addr = read_sock.peer_addr().unwrap();
-    let _to_addr = write_sock.peer_addr().unwrap();
-    let copy_reader_to_writer = tokio::io::copy(read_sock, write_sock);
+    let _from_addr = src.peer_addr().unwrap();
+    let _to_addr = dst.peer_addr().unwrap();
+    let copy_reader_to_writer = tokio::io::copy(src, dst);
     let await_shutdown = rx.recv();
     let mut read_bytes = Ok(0);
     tokio::select! {
@@ -399,7 +398,7 @@ async fn relay_inner(
     match read_bytes {
         Ok(bytes) => {
             debug!("Transferred {bytes} bytes");
-            let _ = write_sock.shutdown().await;
+            let _ = dst.shutdown().await;
             Ok(bytes as usize)
         }
         Err(e) => Err(RelayPortError::IoError(e)),

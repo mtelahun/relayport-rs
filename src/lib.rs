@@ -9,7 +9,7 @@
 //! ```no_run
 //! use std::error::Error;
 //! use tokio::sync::broadcast;
-//! use relayport_rs::RelaySocket;
+//! use relayport_rs::RelayTcpSocket;
 //! use relayport_rs::command::RelayCommand;
 //! use tokio::signal::unix::{signal, SignalKind};
 //!
@@ -19,7 +19,7 @@
 //!     let (tx, rx) = broadcast::channel(16);
 //!
 //!     // build a relay with a listener TCP socket
-//!     let relay = RelaySocket::build()
+//!     let relay = RelayTcpSocket::build()
 //!         .set_so_reuseaddr(true)
 //!         .set_tcp_nodelay(true)
 //!         .bind("0.0.0.0:8080")?
@@ -51,7 +51,7 @@
 //! use tokio::sync::broadcast;
 //! use relayport_rs::command::RelayCommand;
 //! use relayport_rs::RelayPortError;
-//! use relayport_rs::RelaySocket;
+//! use relayport_rs::RelayTcpSocket;
 //!
 //! #[tokio::main]
 //! pub async fn main() -> Result<(), RelayPortError> {
@@ -59,7 +59,7 @@
 //!     let (tx, rx) = broadcast::channel(16);
 //!
 //!     // build a relay with a listener TCP socket
-//!     let relay = RelaySocket::build()
+//!     let relay = RelayTcpSocket::build()
 //!         .set_so_reuseaddr(true)
 //!         .set_tcp_nodelay(true)
 //!         .bind("0.0.0.0:8080")?
@@ -78,4 +78,5 @@ pub mod error;
 pub mod relay;
 pub use command::RelayCommand;
 pub use error::RelayPortError;
-pub use relay::tcp::{RelaySocket, RelayStream};
+pub use relay::tcp::{RelaySocket as RelayTcpSocket, RelayStream as RelayTcpStream};
+pub use relay::udp::RelaySocket as RelayUdpSocket;
