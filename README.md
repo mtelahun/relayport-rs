@@ -4,8 +4,8 @@ Fast and easy abstraction for proxying TCP and UDP ports.
 ![Rust](https://github.com/mtelahun/relayport-rs/actions/workflows/rust.yml/badge.svg)
 [![codecov](https://codecov.io/gh/mtelahun/relayport-rs/branch/main/graph/badge.svg?token=A1P9I5E2LU)](https://codecov.io/gh/mtelahun/relayport-rs)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
-![crates.io](https://img.shields.io/crates/v/relayport-rs.svg)
-![docs.rs](https://img.shields.io/docsrs/relayport-rs)
+[![crates.io](https://img.shields.io/crates/v/relayport-rs.svg)](https://crates.io/crates/relayport-rs)
+[![docs.rs](https://img.shields.io/docsrs/relayport-rs)](https://docs.rs/crate/relayport-rs/latest)
 
 This library simplifies the creation of asynchronous TCP/UDP proxies from rust applications. The only limit on the number
 of proxies are the resources available on the system on which it is run. This library depends on [tokio](https::/tokio.rs)
