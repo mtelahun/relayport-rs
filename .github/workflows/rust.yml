@@ -82,6 +82,16 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install libssl1.1
+        run: |
+          # Download and install the specific libssl1.1 .deb package for
+          # compatibility with Ubuntu 22.04+ runners
+          wget http://nz2.archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.16_amd64.deb
+          sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2.16_amd64.deb
+          # The 'shell: bash' is often the default, but ensures
+          # command compatibility if needed
+          shell: bash
+
       - name: Run cargo-tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
