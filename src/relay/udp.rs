@@ -9,6 +9,7 @@ use socket2::{Domain, Protocol, SockAddr, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::RwLock;
+use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tracing::{debug, error};
 
@@ -181,7 +182,8 @@ impl BoundRelaySocket {
     ///
     /// # Returns
     /// This method will not return unless a [RelayCommand::Shutdown] is sent by the caller or
-    /// it encounters an error. If it encounters an error it will return a RelayPortError.
+    /// it encounters an error. After a shutdown it returns once every relayed connection has
+    /// closed. If it encounters an error it will return a RelayPortError.
     ///
     /// # Example
     /// ```no_run
@@ -228,17 +230,23 @@ impl BoundRelaySocket {
         let (cancel_tx, cancel_rx) = tokio::sync::mpsc::channel(24);
         self.spawn_connection_cancel(cancel_rx).await;
         let mut command = command.resubscribe();
-        loop {
+        let mut connections = JoinSet::new();
+        let result = loop {
             let mut buf = [0u8; MAX_PKT_SIZE];
             // Wait for a packet or a command, so shutdown works even when no packets arrive.
             let (len, client_addr) = tokio::select! {
-                result = self.socket.0.recv_from(&mut buf) => result?,
+                result = self.socket.0.recv_from(&mut buf) => match result {
+                    Ok(received) => received,
+                    Err(e) => break Err(e.into()),
+                },
+                // Reap finished connections so the set doesn't grow without bound.
+                Some(_) = connections.join_next() => continue,
                 result = command.recv() => match result {
                     Ok(RelayCommand::Shutdown) => {
                         debug!("received relay command: shutdown");
-                        break;
+                        break Ok(());
                     }
-                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
+                    Err(e) => break Err(RelayPortError::InternalCommunicationError(e)),
                 },
             };
 
@@ -281,15 +289,16 @@ impl BoundRelaySocket {
                 error!("failed to relay packet from {client_addr}: {e}");
             }
             self.spawn_bidirectional_relay(
+                &mut connections,
                 client_socket,
                 remote_socket,
                 command.resubscribe(),
                 cancel_tx.clone(),
             )
             .await;
-        }
+        };
 
-        Ok(())
+        super::wait_for_connections(connections, result).await
     }
 
     /// Connects a UDP socket to the remote peer, denoted by addr, to which we are relaying traffic.
@@ -358,6 +367,7 @@ impl BoundRelaySocket {
 
     async fn spawn_bidirectional_relay(
         &self,
+        connections: &mut JoinSet<()>,
         client: InnerUdpSocket,
         remote: InnerUdpSocket,
         command: Receiver<RelayCommand>,
@@ -366,7 +376,7 @@ impl BoundRelaySocket {
         let client = client.clone();
         let remote = remote.clone();
 
-        tokio::spawn(async move {
+        connections.spawn(async move {
             let _ = tokio::join!(
                 unidirectional_relay(
                     client.clone(),
