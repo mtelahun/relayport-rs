@@ -119,3 +119,29 @@ async fn spawn_udp_relay(
 
     (client, server)
 }
+
+#[tokio::test]
+async fn udp_relay_survives_client_setup_failure() {
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+
+    // Without SO_REUSEADDR on the listener, binding the per-client socket to the
+    // listener's address fails, so setting up the client's relay errors out.
+    let (_tx, rx) = broadcast::channel::<RelayCommand>(1);
+    let relay = RelayUdpSocket::build()
+        .bind("127.0.0.1:33099")
+        .await
+        .expect("failed to bind relay");
+    let handle = tokio::spawn(async move { relay.run("127.0.0.1:33100", &rx).await });
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.send_to(b"hello", "127.0.0.1:33099").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert!(
+        !handle.is_finished(),
+        "relay stopped after one client's setup failed: {:?}",
+        handle.await
+    );
+    handle.abort();
+}
