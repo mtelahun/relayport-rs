@@ -40,28 +40,26 @@ impl TestTcpServer {
             println!("Server listening on {addr}");
             let listener = TcpListener::bind(&addr)
                 .await
-                .expect(&format!("test server failed to bind to {}", addr));
+                .unwrap_or_else(|_| panic!("test server failed to bind to {}", addr));
             let (mut stream, _) = listener
                 .accept()
                 .await
                 .expect("listening server failed to accept incomming connection");
             println!("Server {addr}: accepted connection");
-            loop {
+            'read: {
                 let count;
                 println!("Server {addr}: reading from socket");
                 tokio::select! {
                     biased;
                     result = stream.read(read_buf.as_mut_ref()) => {
-                        count = result.or_else(|e| match e.kind() {
-                            _ => { println!("failed to read from tcp stream: {}", e); Err(e) }
-                        }).expect("Server: failed to read from socket");
+                        count = result.map_err(|e| { println!("failed to read from tcp stream: {}", e); e }).expect("Server: failed to read from socket");
                     },
-                    _ = command.recv() => { println!("Server {addr}: recieved cancel signal"); break; }
+                    _ = command.recv() => { println!("Server {addr}: recieved cancel signal"); break 'read; }
                 }
 
                 if count == 0 {
                     println!("Server {addr}: received 0 bytes");
-                    break;
+                    break 'read;
                 } else {
                     println!("Server {addr}: received {count} bytes");
                     if op == TestOp::Write {
@@ -71,7 +69,7 @@ impl TestTcpServer {
                             .expect("udp server failed to send input back to client");
                         println!("UDP Server {addr}: wrote back to client {count} bytes");
                     }
-                    break;
+                    break 'read;
                 }
             }
             output
@@ -102,24 +100,22 @@ impl TestUdpServer {
             println!("UDP Server listening on {addr}");
             let listener = UdpSocket::bind(&addr)
                 .await
-                .expect(&format!("test udp server failed to bind to {}", addr));
-            loop {
+                .unwrap_or_else(|_| panic!("test udp server failed to bind to {}", addr));
+            'read: {
                 let count;
                 let peer_addr;
                 println!("Server {addr}: reading from socket...");
                 tokio::select! {
                     biased;
                     result = listener.recv_from(read_buf.as_mut_ref()) => {
-                        (count, peer_addr) = result.or_else(|e| match e.kind() {
-                            _ => { println!("failed to read from UDP: {}", e); Err(e) }
-                        }).expect("UDP Server: failed to read from socket");
+                        (count, peer_addr) = result.map_err(|e| { println!("failed to read from UDP: {}", e); e }).expect("UDP Server: failed to read from socket");
                     },
-                    _ = command.recv() => { println!("Server {addr}: recieved cancel signal"); break; }
+                    _ = command.recv() => { println!("Server {addr}: recieved cancel signal"); break 'read; }
                 }
 
                 if count == 0 {
                     println!("Server {addr}: received 0 bytes");
-                    break;
+                    break 'read;
                 } else {
                     println!("UDP Server {addr}: received {count} bytes");
                     if op == TestOp::Write {
@@ -132,7 +128,7 @@ impl TestUdpServer {
                     output
                         .send(read_buf)
                         .expect("failed to send received buffer");
-                    break;
+                    break 'read;
                 }
             }
         });
