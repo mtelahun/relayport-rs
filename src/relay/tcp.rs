@@ -367,14 +367,12 @@ impl RelayListener {
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all, err, ret, fields(_from_addr, _to_addr))]
+#[tracing::instrument(level = "debug", skip_all, err, ret)]
 async fn single_direction_relay(
     src: &mut ReadHalf<'_>,
     dst: &mut WriteHalf<'_>,
     mut rx: Receiver<RelayCommand>,
 ) -> Result<usize, RelayPortError> {
-    let _from_addr = src.peer_addr().unwrap();
-    let _to_addr = dst.peer_addr().unwrap();
     let copy_reader_to_writer = tokio::io::copy(src, dst);
     let await_shutdown = rx.recv();
     let mut read_bytes = Ok(0);
@@ -403,5 +401,35 @@ async fn single_direction_relay(
             Ok(bytes as usize)
         }
         Err(e) => Err(RelayPortError::IoError(e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn single_direction_relay_handles_reset_peer() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        // Zero linger makes the close send RST, after which the server side has no peer address.
+        socket2::SockRef::from(&client)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(client);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            server.peer_addr().is_err(),
+            "test setup: peer should be gone"
+        );
+
+        let (_tx, rx) = tokio::sync::broadcast::channel(1);
+        let (mut r, mut w) = server.split();
+        let result = single_direction_relay(&mut r, &mut w, rx).await;
+        assert!(result.is_ok(), "{result:?}");
     }
 }
