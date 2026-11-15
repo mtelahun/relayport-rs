@@ -145,3 +145,25 @@ async fn udp_relay_survives_client_setup_failure() {
     );
     handle.abort();
 }
+
+#[tokio::test]
+async fn udp_relay_shuts_down_without_traffic() {
+    use std::time::Duration;
+
+    let (tx, rx) = broadcast::channel(1);
+    let relay = RelayUdpSocket::build()
+        .set_so_reuseaddr(true)
+        .bind("127.0.0.1:34099")
+        .await
+        .expect("failed to bind relay");
+    let handle = tokio::spawn(async move { relay.run("127.0.0.1:34100", &rx).await });
+    // Let run() subscribe to the command channel before sending.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tx.send(RelayCommand::Shutdown).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("relay did not shut down while idle")
+        .unwrap();
+    assert!(result.is_ok(), "relay returned an error: {result:?}");
+}

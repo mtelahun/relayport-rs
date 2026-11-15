@@ -223,10 +223,20 @@ impl BoundRelaySocket {
 
         let (cancel_tx, cancel_rx) = tokio::sync::mpsc::channel(24);
         self.spawn_connection_cancel(cancel_rx).await;
+        let mut command = command.resubscribe();
         loop {
-            let mut command = command.resubscribe();
             let mut buf = [0u8; MAX_PKT_SIZE];
-            let (len, client_addr) = self.socket.0.recv_from(&mut buf).await?;
+            // Wait for a packet or a command, so shutdown works even when no packets arrive.
+            let (len, client_addr) = tokio::select! {
+                result = self.socket.0.recv_from(&mut buf) => result?,
+                result = command.recv() => match result {
+                    Ok(RelayCommand::Shutdown) => {
+                        debug!("received relay command: shutdown");
+                        break;
+                    }
+                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
+                },
+            };
 
             // There is a delay between when we receive a packet and when we setup the bidirectional
             // link (creating a race-condition). Catch any packets that arrive during this race.
@@ -266,19 +276,13 @@ impl BoundRelaySocket {
             if let Err(e) = remote_socket.0.send(&buf[0..len]).await {
                 error!("failed to relay packet from {client_addr}: {e}");
             }
-            tokio::select! {
-                biased;
-                _ = self.spawn_bidirectional_relay(client_socket, remote_socket, command.resubscribe(), cancel_tx.clone()) => { continue }
-                result = command.recv() => {match result {
-                    Ok(cmd) => match cmd {
-                        RelayCommand::Shutdown => {
-                            debug!("received relay command: shutdown");
-                            break
-                        },
-                    },
-                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
-                }}
-            }
+            self.spawn_bidirectional_relay(
+                client_socket,
+                remote_socket,
+                command.resubscribe(),
+                cancel_tx.clone(),
+            )
+            .await;
         }
 
         Ok(())
