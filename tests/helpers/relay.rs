@@ -23,13 +23,10 @@ impl RelayTcp {
             .set_so_reuseaddr(true)
             .set_tcp_nodelay(true)
             .bind(&listen_addr)
-            .expect(&format!("failed to bind to {}", listen_addr))
+            .unwrap_or_else(|_| panic!("failed to bind to {}", listen_addr))
             .listen()
-            .expect(&format!(
-                "failed to listen to bound address: {}",
-                listen_addr
-            ));
-        let _ = tokio::task::spawn(async move {
+            .unwrap_or_else(|_| panic!("failed to listen to bound address: {}", listen_addr));
+        tokio::task::spawn(async move {
             relay
                 .run(&relay_addr, &rx)
                 .await
@@ -60,8 +57,8 @@ impl RelayUdp {
             .set_so_reuseaddr(true)
             .bind(&listen_addr)
             .await
-            .expect(&format!("failed to bind address: {}", listen_addr));
-        let _ = tokio::task::spawn(async move {
+            .unwrap_or_else(|_| panic!("failed to bind address: {}", listen_addr));
+        tokio::task::spawn(async move {
             relay
                 .run(&relay_addr, &rx)
                 .await

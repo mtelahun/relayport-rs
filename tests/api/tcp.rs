@@ -88,28 +88,18 @@ async fn tcp_server_to_client() {
 #[tokio::test]
 async fn set_tcp_builder_options() {
     let mut builder = RelayTcpSocket::build();
-    assert_eq!(
-        builder.so_reuseaddr(),
-        false,
+    assert!(
+        !builder.so_reuseaddr(),
         "initial state of tcp:SO_REUSEADDR is False"
     );
-    assert_eq!(
-        builder.tcp_nodelay(),
-        false,
+    assert!(
+        !builder.tcp_nodelay(),
         "initial state of tcp:TCP_NODELAY is False"
     );
 
     let builder = builder.set_so_reuseaddr(true).set_tcp_nodelay(true);
-    assert_eq!(
-        builder.so_reuseaddr(),
-        true,
-        "state of tcp:SO_REUSEADDR is True"
-    );
-    assert_eq!(
-        builder.tcp_nodelay(),
-        true,
-        "state of tcp:TCP_NODELAY is True"
-    );
+    assert!(builder.so_reuseaddr(), "state of tcp:SO_REUSEADDR is True");
+    assert!(builder.tcp_nodelay(), "state of tcp:TCP_NODELAY is True");
 }
 
 /// Spawn a TCP relay.

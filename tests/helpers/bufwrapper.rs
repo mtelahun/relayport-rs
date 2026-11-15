@@ -6,6 +6,12 @@ pub struct BufWrapper {
     len: usize,
 }
 
+impl Default for BufWrapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufWrapper {
     pub fn new() -> Self {
         Self {
@@ -16,10 +22,6 @@ impl BufWrapper {
 
     pub fn exact_slice(&self) -> &[u8] {
         &self.inner[0..self.len]
-    }
-
-    pub fn as_ref(&self) -> &[u8] {
-        &self.inner.as_ref()
     }
 
     pub fn as_mut_ref(&mut self) -> &mut [u8] {
@@ -39,5 +41,11 @@ impl Deref for BufWrapper {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl AsRef<[u8]> for BufWrapper {
+    fn as_ref(&self) -> &[u8] {
+        self.inner.as_ref()
     }
 }

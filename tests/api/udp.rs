@@ -89,18 +89,13 @@ async fn udp_server_to_client() {
 #[tokio::test]
 async fn set_udp_builder_options() {
     let mut builder = RelayUdpSocket::build();
-    assert_eq!(
-        builder.so_reuseaddr(),
-        false,
+    assert!(
+        !builder.so_reuseaddr(),
         "initial state of udp:SO_REUSEADDR is False"
     );
 
     let builder = builder.set_so_reuseaddr(true);
-    assert_eq!(
-        builder.so_reuseaddr(),
-        true,
-        "state of udp:SO_REUSEADDR is True"
-    );
+    assert!(builder.so_reuseaddr(), "state of udp:SO_REUSEADDR is True");
 }
 
 /// Spawn a UDP relay.
