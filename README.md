@@ -16,7 +16,7 @@ To use this library in your own package add the following to your Cargo.toml:
 
 ```toml
 [dependencies]
-relayport-rs = "0.5.0"
+relayport-rs = "0.6.0"
 ```
 
 ## Example
