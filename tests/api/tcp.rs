@@ -159,3 +159,53 @@ async fn tcp_relay_serves_concurrent_connections() {
 
     tx.send(RelayCommand::Shutdown).unwrap();
 }
+
+#[tokio::test]
+async fn tcp_shutdown_closes_connection_waiting_on_remote() {
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::{TcpSocket, TcpStream};
+
+    // A remote whose accept queue is full: Linux drops further connection
+    // attempts, so the relay's connect to it hangs.
+    let remote = TcpSocket::new_v4().unwrap();
+    remote.bind("127.0.0.1:23100".parse().unwrap()).unwrap();
+    let _remote = remote.listen(1).unwrap();
+    let mut fillers = Vec::new();
+    while let Ok(stream) = tokio::time::timeout(
+        Duration::from_millis(200),
+        TcpStream::connect("127.0.0.1:23100"),
+    )
+    .await
+    {
+        fillers.push(stream.unwrap());
+        assert!(fillers.len() < 16, "test setup: accept queue never filled");
+    }
+
+    let (tx, rx) = broadcast::channel(1);
+    let relay = RelayTcpSocket::build()
+        .set_so_reuseaddr(true)
+        .bind("127.0.0.1:13099")
+        .unwrap()
+        .listen()
+        .unwrap();
+    let handle = tokio::spawn(async move { relay.run("127.0.0.1:23100", &rx).await });
+
+    let mut client = TcpStream::connect("127.0.0.1:13099").await.unwrap();
+    // Let the relay accept the client and start connecting to the remote.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tx.send(RelayCommand::Shutdown).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("relay did not shut down")
+        .unwrap();
+    assert!(result.is_ok(), "relay returned an error: {result:?}");
+
+    // run() has returned, so the relayed connection must already be closed.
+    let mut buf = [0u8; 1];
+    tokio::time::timeout(Duration::from_secs(1), client.read(&mut buf))
+        .await
+        .expect("client connection still open after the relay shut down")
+        .ok();
+}

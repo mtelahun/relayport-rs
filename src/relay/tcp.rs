@@ -7,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::broadcast::Receiver;
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use crate::command::RelayCommand;
@@ -268,7 +269,8 @@ impl RelayListener {
     ///
     /// # Returns
     /// This method will not return unless a [RelayCommand::Shutdown] is sent by the caller or
-    /// it encounters an error. If it encounters an error it will return it as a RelayPortError.
+    /// it encounters an error. After a shutdown it returns once every relayed connection has
+    /// closed. If it encounters an error it will return it as a RelayPortError.
     ///
     /// # Example
     /// ```no_run
@@ -310,44 +312,53 @@ impl RelayListener {
     ) -> Result<(), RelayPortError> {
         let relay_addr = peer.parse().map_err(RelayPortError::ParseAddrError)?;
         let mut command = cancel.resubscribe();
-        loop {
+        let mut connections = JoinSet::new();
+        let result = loop {
             tokio::select! {
-                result = self.0.accept() => {
-                    let (client_stream, client_addr) = result?;
-                    debug!("accepted connection from {}", client_addr);
-                    // Each connection runs in its own task so the next accept() isn't blocked.
-                    Self::spawn_bidirectional_relay(client_stream, relay_addr, cancel.resubscribe());
-                }
+                result = self.0.accept() => match result {
+                    Ok((client_stream, client_addr)) => {
+                        debug!("accepted connection from {}", client_addr);
+                        // Each connection runs in its own task so the next accept() isn't blocked.
+                        Self::spawn_bidirectional_relay(&mut connections, client_stream, relay_addr, cancel.resubscribe());
+                    }
+                    Err(e) => break Err(e.into()),
+                },
+                // Reap finished connections so the set doesn't grow without bound.
+                Some(_) = connections.join_next() => {}
                 result = command.recv() => match result {
                     Ok(RelayCommand::Shutdown) => {
                         debug!("received relay command: shutdown");
-                        break
+                        break Ok(())
                     }
-                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
+                    Err(e) => break Err(RelayPortError::InternalCommunicationError(e)),
                 }
             }
-        }
+        };
 
-        Ok(())
+        super::wait_for_connections(connections, result).await
     }
 
     fn spawn_bidirectional_relay(
+        connections: &mut JoinSet<()>,
         mut client_stream: TcpStream,
         relay_addr: SocketAddr,
-        cancel: Receiver<RelayCommand>,
+        mut cancel: Receiver<RelayCommand>,
     ) {
-        tokio::spawn(async move {
-            let mut relay = match RelaySocket::build()
+        connections.spawn(async move {
+            let connect = RelaySocket::build()
                 .set_so_reuseaddr(true)
                 .set_tcp_nodelay(true)
-                .connect_addr(relay_addr, None)
-                .await
-            {
-                Ok(relay) => relay,
-                Err(e) => {
-                    error!("failed to connect to {relay_addr}: {e}");
-                    return;
-                }
+                .connect_addr(relay_addr, None);
+            let mut relay = tokio::select! {
+                result = connect => match result {
+                    Ok(relay) => relay,
+                    Err(e) => {
+                        error!("failed to connect to {relay_addr}: {e}");
+                        return;
+                    }
+                },
+                // The remote may be slow to accept; don't make shutdown wait for it.
+                _ = cancel.recv() => return,
             };
             let (mut client_r, mut client_w) = client_stream.split();
             let (mut remote_r, mut remote_w) = relay.0.split();
