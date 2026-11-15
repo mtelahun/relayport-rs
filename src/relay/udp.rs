@@ -10,7 +10,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::command::RelayCommand;
 use crate::RelayPortError;
@@ -98,8 +98,9 @@ impl RelaySocketBuilder {
         self.bind_addr(&addr).await
     }
 
-    async fn bind_addr(self, addr: &SocketAddr) -> Result<BoundRelaySocket, RelayPortError> {
-        let socket = self.create_bound_socket(addr)?;
+    async fn bind_addr(mut self, addr: &SocketAddr) -> Result<BoundRelaySocket, RelayPortError> {
+        // Per-client sockets bind to this same address, which only works if it has SO_REUSEADDR.
+        let socket = self.set_so_reuseaddr(true).create_bound_socket(addr)?;
 
         Ok(BoundRelaySocket {
             socket: InnerUdpSocket::new(socket),
@@ -111,6 +112,9 @@ impl RelaySocketBuilder {
     /// Change the SO_REUSEADDR option on the UDP socket.
     /// If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
+    ///
+    /// Note: the relay always enables SO_REUSEADDR on the socket created by [`RelaySocketBuilder::bind`],
+    /// whatever this is set to, because the per-client sockets it creates share that socket's address.
     /// # Returns
     /// A [RelaySocketBuilder] object configured according to the reuseaddr argument.
     ///
@@ -223,43 +227,66 @@ impl BoundRelaySocket {
 
         let (cancel_tx, cancel_rx) = tokio::sync::mpsc::channel(24);
         self.spawn_connection_cancel(cancel_rx).await;
+        let mut command = command.resubscribe();
         loop {
-            let mut command = command.resubscribe();
             let mut buf = [0u8; MAX_PKT_SIZE];
-            let (len, client_addr) = self.socket.0.recv_from(&mut buf).await?;
+            // Wait for a packet or a command, so shutdown works even when no packets arrive.
+            let (len, client_addr) = tokio::select! {
+                result = self.socket.0.recv_from(&mut buf) => result?,
+                result = command.recv() => match result {
+                    Ok(RelayCommand::Shutdown) => {
+                        debug!("received relay command: shutdown");
+                        break;
+                    }
+                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
+                },
+            };
 
             // There is a delay between when we receive a packet and when we setup the bidirectional
             // link (creating a race-condition). Catch any packets that arrive during this race.
+            // A failure for one client is logged and must not stop the listener for everyone.
             if let Some(sock) = self.remote_connections.read().await.get(&client_addr) {
-                sock.0.send(&buf[0..len]).await?;
+                if let Err(e) = sock.0.send(&buf[0..len]).await {
+                    error!("failed to relay packet from {client_addr}: {e}");
+                }
                 continue;
             } else if let Some(sock) = self.client_connections.read().await.get(&client_addr) {
-                sock.0.send(&buf[0..len]).await?;
+                if let Err(e) = sock.0.send(&buf[0..len]).await {
+                    error!("failed to relay packet from {client_addr}: {e}");
+                }
                 continue;
             }
 
             // This is a new connection. Send the initial packet to the remote and
             // setup the bidirectional link.
-            let client_socket = self
-                .new_client_connection(&client_addr, Some(&my_addr))
-                .await?;
-            let remote_socket = self
-                .new_remote_connection(&remote_addr, &client_addr)
-                .await?;
-            let _ = remote_socket.0.send(&buf[0..len]).await?;
-            tokio::select! {
-                biased;
-                _ = self.spawn_bidirectional_relay(client_socket, remote_socket, command.resubscribe(), cancel_tx.clone()) => { continue }
-                result = command.recv() => {match result {
-                    Ok(cmd) => match cmd {
-                        RelayCommand::Shutdown => {
-                            debug!("received relay command: shutdown");
-                            break
-                        },
-                    },
-                    Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
-                }}
+            let setup = async {
+                let client = self
+                    .new_client_connection(&client_addr, Some(&my_addr))
+                    .await?;
+                let remote = self
+                    .new_remote_connection(&remote_addr, &client_addr)
+                    .await?;
+                Ok::<_, RelayPortError>((client, remote))
+            };
+            let (client_socket, remote_socket) = match setup.await {
+                Ok(sockets) => sockets,
+                Err(e) => {
+                    error!("failed to set up relay for {client_addr}: {e}");
+                    // Don't leave a half-built entry behind, or later packets take the wrong path.
+                    self.client_connections.write().await.remove(&client_addr);
+                    continue;
+                }
+            };
+            if let Err(e) = remote_socket.0.send(&buf[0..len]).await {
+                error!("failed to relay packet from {client_addr}: {e}");
             }
+            self.spawn_bidirectional_relay(
+                client_socket,
+                remote_socket,
+                command.resubscribe(),
+                cancel_tx.clone(),
+            )
+            .await;
         }
 
         Ok(())

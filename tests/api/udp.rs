@@ -119,3 +119,86 @@ async fn spawn_udp_relay(
 
     (client, server)
 }
+
+#[tokio::test]
+async fn udp_relay_survives_client_setup_failure() {
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+
+    // The remote socket is bound to 0.0.0.0 (IPv4), so connecting it to an IPv6
+    // remote fails and setting up the client's relay errors out.
+    let (_tx, rx) = broadcast::channel::<RelayCommand>(1);
+    let relay = RelayUdpSocket::build()
+        .bind("127.0.0.1:33099")
+        .await
+        .expect("failed to bind relay");
+    let handle = tokio::spawn(async move { relay.run("[::1]:33100", &rx).await });
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.send_to(b"hello", "127.0.0.1:33099").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert!(
+        !handle.is_finished(),
+        "relay stopped after one client's setup failed: {:?}",
+        handle.await
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn udp_relay_shuts_down_without_traffic() {
+    use std::time::Duration;
+
+    let (tx, rx) = broadcast::channel(1);
+    let relay = RelayUdpSocket::build()
+        .set_so_reuseaddr(true)
+        .bind("127.0.0.1:34099")
+        .await
+        .expect("failed to bind relay");
+    let handle = tokio::spawn(async move { relay.run("127.0.0.1:34100", &rx).await });
+    // Let run() subscribe to the command channel before sending.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tx.send(RelayCommand::Shutdown).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("relay did not shut down while idle")
+        .unwrap();
+    assert!(result.is_ok(), "relay returned an error: {result:?}");
+}
+
+#[tokio::test]
+async fn udp_relay_works_with_default_options() {
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+
+    // Echo server on the remote address.
+    let server = UdpSocket::bind("127.0.0.1:35100").await.unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 64];
+        loop {
+            let (len, peer) = server.recv_from(&mut buf).await.unwrap();
+            server.send_to(&buf[..len], peer).await.unwrap();
+        }
+    });
+    // No set_so_reuseaddr() call: the builder default.
+    let (tx, rx) = broadcast::channel(1);
+    let relay = RelayUdpSocket::build()
+        .bind("127.0.0.1:35099")
+        .await
+        .expect("failed to bind relay");
+    tokio::spawn(async move { relay.run("127.0.0.1:35100", &rx).await });
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.connect("127.0.0.1:35099").await.unwrap();
+    client.send(b"hello").await.unwrap();
+    let mut buf = [0u8; 64];
+    let len = tokio::time::timeout(Duration::from_secs(2), client.recv(&mut buf))
+        .await
+        .expect("relay built with default options did not relay traffic")
+        .unwrap();
+    assert_eq!(&buf[..len], b"hello");
+
+    tx.send(RelayCommand::Shutdown).unwrap();
+}
