@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::broadcast::Receiver;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::command::RelayCommand;
 use crate::RelayPortError;
@@ -309,40 +309,46 @@ impl RelayListener {
         cancel: &Receiver<RelayCommand>,
     ) -> Result<(), RelayPortError> {
         let relay_addr = peer.parse().map_err(RelayPortError::ParseAddrError)?;
+        let mut command = cancel.resubscribe();
         loop {
-            let mut cancel = cancel.resubscribe();
-            let (client_stream, client_addr) = self.0.accept().await?;
-            debug!("accepted connection from {}", client_addr);
             tokio::select! {
-                biased;
-                _ = self.spawn_bidirectional_relay(client_stream, relay_addr, cancel.resubscribe()) => { continue }
-                result = cancel.recv() => {match result {
-                    Ok(cmd) => match cmd {
-                        RelayCommand::Shutdown => {
-                            debug!("received relay command: shutdown");
-                            break
-                        },
-                    },
+                result = self.0.accept() => {
+                    let (client_stream, client_addr) = result?;
+                    debug!("accepted connection from {}", client_addr);
+                    // Each connection runs in its own task so the next accept() isn't blocked.
+                    Self::spawn_bidirectional_relay(client_stream, relay_addr, cancel.resubscribe());
+                }
+                result = command.recv() => match result {
+                    Ok(RelayCommand::Shutdown) => {
+                        debug!("received relay command: shutdown");
+                        break
+                    }
                     Err(e) => return Err(RelayPortError::InternalCommunicationError(e)),
-                }}
+                }
             }
         }
 
         Ok(())
     }
 
-    async fn spawn_bidirectional_relay(
-        &self,
+    fn spawn_bidirectional_relay(
         mut client_stream: TcpStream,
         relay_addr: SocketAddr,
         cancel: Receiver<RelayCommand>,
-    ) -> Result<(), RelayPortError> {
-        let mut relay = RelaySocket::build()
-            .set_so_reuseaddr(true)
-            .set_tcp_nodelay(true)
-            .connect_addr(relay_addr, None)
-            .await?;
-        let handle = tokio::spawn(async move {
+    ) {
+        tokio::spawn(async move {
+            let mut relay = match RelaySocket::build()
+                .set_so_reuseaddr(true)
+                .set_tcp_nodelay(true)
+                .connect_addr(relay_addr, None)
+                .await
+            {
+                Ok(relay) => relay,
+                Err(e) => {
+                    error!("failed to connect to {relay_addr}: {e}");
+                    return;
+                }
+            };
             let (mut client_r, mut client_w) = client_stream.split();
             let (mut remote_r, mut remote_w) = relay.0.split();
             let (xfer_client, xfer_relay) = tokio::join!(
@@ -351,20 +357,13 @@ impl RelayListener {
             );
             match xfer_client {
                 Ok(count) => debug!("{count} bytes relayed from client to remote"),
-                Err(e) => return Err(e),
+                Err(e) => error!("client to remote relay failed: {e}"),
             }
             match xfer_relay {
                 Ok(count) => debug!("{count} bytes relayed from remote to client"),
-                Err(e) => return Err(e),
+                Err(e) => error!("remote to client relay failed: {e}"),
             }
-
-            Ok(())
         });
-
-        match tokio::join!(handle) {
-            (Ok(_),) => Ok(()),
-            (Err(e),) => Err(RelayPortError::Unknown(e.to_string())),
-        }
     }
 }
 
