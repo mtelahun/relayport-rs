@@ -125,14 +125,14 @@ async fn udp_relay_survives_client_setup_failure() {
     use std::time::Duration;
     use tokio::net::UdpSocket;
 
-    // Without SO_REUSEADDR on the listener, binding the per-client socket to the
-    // listener's address fails, so setting up the client's relay errors out.
+    // The remote socket is bound to 0.0.0.0 (IPv4), so connecting it to an IPv6
+    // remote fails and setting up the client's relay errors out.
     let (_tx, rx) = broadcast::channel::<RelayCommand>(1);
     let relay = RelayUdpSocket::build()
         .bind("127.0.0.1:33099")
         .await
         .expect("failed to bind relay");
-    let handle = tokio::spawn(async move { relay.run("127.0.0.1:33100", &rx).await });
+    let handle = tokio::spawn(async move { relay.run("[::1]:33100", &rx).await });
 
     let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     client.send_to(b"hello", "127.0.0.1:33099").await.unwrap();
@@ -166,4 +166,39 @@ async fn udp_relay_shuts_down_without_traffic() {
         .expect("relay did not shut down while idle")
         .unwrap();
     assert!(result.is_ok(), "relay returned an error: {result:?}");
+}
+
+#[tokio::test]
+async fn udp_relay_works_with_default_options() {
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+
+    // Echo server on the remote address.
+    let server = UdpSocket::bind("127.0.0.1:35100").await.unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 64];
+        loop {
+            let (len, peer) = server.recv_from(&mut buf).await.unwrap();
+            server.send_to(&buf[..len], peer).await.unwrap();
+        }
+    });
+    // No set_so_reuseaddr() call: the builder default.
+    let (tx, rx) = broadcast::channel(1);
+    let relay = RelayUdpSocket::build()
+        .bind("127.0.0.1:35099")
+        .await
+        .expect("failed to bind relay");
+    tokio::spawn(async move { relay.run("127.0.0.1:35100", &rx).await });
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.connect("127.0.0.1:35099").await.unwrap();
+    client.send(b"hello").await.unwrap();
+    let mut buf = [0u8; 64];
+    let len = tokio::time::timeout(Duration::from_secs(2), client.recv(&mut buf))
+        .await
+        .expect("relay built with default options did not relay traffic")
+        .unwrap();
+    assert_eq!(&buf[..len], b"hello");
+
+    tx.send(RelayCommand::Shutdown).unwrap();
 }

@@ -98,8 +98,9 @@ impl RelaySocketBuilder {
         self.bind_addr(&addr).await
     }
 
-    async fn bind_addr(self, addr: &SocketAddr) -> Result<BoundRelaySocket, RelayPortError> {
-        let socket = self.create_bound_socket(addr)?;
+    async fn bind_addr(mut self, addr: &SocketAddr) -> Result<BoundRelaySocket, RelayPortError> {
+        // Per-client sockets bind to this same address, which only works if it has SO_REUSEADDR.
+        let socket = self.set_so_reuseaddr(true).create_bound_socket(addr)?;
 
         Ok(BoundRelaySocket {
             socket: InnerUdpSocket::new(socket),
@@ -111,6 +112,9 @@ impl RelaySocketBuilder {
     /// Change the SO_REUSEADDR option on the UDP socket.
     /// If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
+    ///
+    /// Note: the relay always enables SO_REUSEADDR on the socket created by [`RelaySocketBuilder::bind`],
+    /// whatever this is set to, because the per-client sockets it creates share that socket's address.
     /// # Returns
     /// A [RelaySocketBuilder] object configured according to the reuseaddr argument.
     ///
