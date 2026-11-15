@@ -10,7 +10,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::command::RelayCommand;
 use crate::RelayPortError;
@@ -397,8 +397,8 @@ async fn unidirectional_relay(
     mut command: Receiver<RelayCommand>,
     cancel: tokio::sync::mpsc::Sender<InnerUdpSocket>,
 ) -> Result<usize, RelayPortError> {
-    let from_addr = src.0.peer_addr().unwrap();
-    let to_addr = dst.0.peer_addr().unwrap();
+    let from_addr = src.0.peer_addr()?;
+    let to_addr = dst.0.peer_addr()?;
 
     let mut xfer_bytes = 0;
     let mut buf = [0u8; MAX_PKT_SIZE];
@@ -412,7 +412,7 @@ async fn unidirectional_relay(
             let result = dst_.0.send(&buf[0..len]).await;
             if result.is_err() {
                 let e = result.err().unwrap();
-                eprintln!("failed to relay packet: {from_addr} -> {to_addr}: {e}");
+                error!("failed to relay packet: {from_addr} -> {to_addr}: {e}");
                 return Err(e);
             } else {
                 let len = result.ok().unwrap();
@@ -458,5 +458,84 @@ async fn unidirectional_relay(
             Ok(bytes)
         }
         Err(e) => Err(RelayPortError::IoError(e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::Mutex;
+    use tokio::sync::{broadcast, mpsc};
+
+    #[tokio::test]
+    async fn unidirectional_relay_returns_error_for_unconnected_socket() {
+        let src = InnerUdpSocket::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let dst = InnerUdpSocket::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let (_tx, rx) = broadcast::channel(1);
+        let (cancel, _cancel_rx) = mpsc::channel(1);
+
+        let result = unidirectional_relay(src, dst, rx, cancel).await;
+        assert!(
+            matches!(result, Err(RelayPortError::IoError(_))),
+            "{result:?}"
+        );
+    }
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn unidirectional_relay_logs_send_failure_with_tracing() {
+        let captured = Captured::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        // Thread-local; the test runtime is single-threaded so the relay logs here.
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        // src receives from client; dst points at a port nobody listens on.
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let src = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        src.connect(client.local_addr().unwrap()).await.unwrap();
+        client.connect(src.local_addr().unwrap()).await.unwrap();
+        let closed_addr = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let dst = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        dst.connect(closed_addr).await.unwrap();
+        // The ICMP port-unreachable reply leaves "connection refused" pending on dst,
+        // so the relay's next send on it fails.
+        dst.send(b"x").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client.send(b"hello").await.unwrap();
+
+        let (_tx, rx) = broadcast::channel(1);
+        let (cancel, _cancel_rx) = mpsc::channel(1);
+        let result = unidirectional_relay(
+            InnerUdpSocket::new(src),
+            InnerUdpSocket::new(dst),
+            rx,
+            cancel,
+        )
+        .await;
+        assert!(result.is_err(), "{result:?}");
+
+        let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("failed to relay packet"), "{logs}");
     }
 }
