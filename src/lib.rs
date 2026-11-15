@@ -1,7 +1,7 @@
-//! Fast and easy abstraction for proxying TCP ports.
+//! Fast and easy abstraction for proxying TCP and UDP ports.
 //!
-//! This library simplifies the creation of asynchronous TCP proxies from rust applications. The only limit on the number
-//! of proxies are the resources available on the system on which it is run. This library depends on [tokio](https::/tokio.rs)
+//! This library simplifies the creation of asynchronous TCP and UDP proxies from rust applications. The only limit on the number
+//! of proxies are the resources available on the system on which it is run. This library depends on [tokio](https://tokio.rs)
 //! for its runtime.
 //!
 //! # Example
@@ -119,3 +119,8 @@ pub use command::RelayCommand;
 pub use error::RelayPortError;
 pub use relay::tcp::{RelaySocket as RelayTcpSocket, RelayStream as RelayTcpStream};
 pub use relay::udp::RelaySocket as RelayUdpSocket;
+
+// Compile the README's examples as doctests so they can't silently break again.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

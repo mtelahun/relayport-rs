@@ -71,7 +71,7 @@ impl RelaySocketBuilder {
     /// Binds a UDP socket to addr.
     ///
     /// The addr argument must be a string slice that can be converted into a local address and port.
-    /// Unlike its [RelayTcpSock] counterpart this method is asynchronous.
+    /// Unlike its [TCP counterpart](crate::relay::tcp::RelaySocketBuilder::bind) this method is asynchronous.
     ///
     /// # Returns
     /// This method returns a [BoundRelaySocket] wrapped in a [Result]. If the operation fails for
@@ -168,15 +168,15 @@ impl RelaySocketBuilder {
 }
 
 impl BoundRelaySocket {
-    /// Start relaying incomming UDP traffic to the remote peer.
+    /// Start relaying incoming UDP traffic to the remote peer.
     ///
     /// Wait for a connection to come in and begin relaying traffic from
-    /// the client to the remote peer and vice versa. After an incomming connection is
+    /// the client to the remote peer and vice versa. After an incoming connection is
     /// accepted this method will spawn a [tokio::task] to handle relaying
     /// traffic. The spawned task will be a bi-directional relay that will handle traffic
     /// in both directions asynchronously. The caller is responsible for creating a
-    /// [tokio::sync::broadcast] chanel and passing the receiver half to this method. The
-    /// chanel can be used by the caller to send [RelayCommand] objects to the spawned task.
+    /// [tokio::sync::broadcast] channel and passing the receiver half to this method. The
+    /// channel can be used by the caller to send [RelayCommand] objects to the spawned task.
     /// Currently, the only command supported by the library is a shutdown command to instruct
     /// the task to exit cleanly.
     ///
@@ -210,7 +210,7 @@ impl BoundRelaySocket {
     ///     });
     ///
     ///     // Do other work
-    ///     tokio::time::sleep(std::time::Duration::from_secs(60));
+    ///     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     ///
     ///     // send the task a shutdown command so it exits cleanly
     ///     tx.send(RelayCommand::Shutdown)?;
@@ -301,13 +301,11 @@ impl BoundRelaySocket {
         super::wait_for_connections(connections, result).await
     }
 
-    /// Connects a UDP socket to the remote peer, denoted by addr, to which we are relaying traffic.
-    /// The addr argument must be a string slice that can be converted to a [`SocketAddr`]
-    /// object. The bind_addr argument is an Option containing a string slice that specifies the
-    /// local address the socket should bind to. If it is None the method will bind
-    /// to a random local address.
+    /// Returns the socket that relays client_addr's traffic to the remote peer at addr,
+    /// creating it if it doesn't exist yet. A new socket is bound to a random local address and
+    /// connected to addr.
     /// # Returns
-    /// On success the unit type () is returned. Otherwise a RelayPortError error is returned.
+    /// On success the socket is returned. Otherwise a RelayPortError error is returned.
     ///
     async fn new_remote_connection(
         &self,
@@ -327,13 +325,11 @@ impl BoundRelaySocket {
         Ok(peer_map_by_client_addr.get(client_addr).unwrap().clone())
     }
 
-    /// Connects a UDP socket to a client peer denoted by addr. The addr
-    /// argument must be a string slice that can be converted to a [`SocketAddr`] object. The
-    /// bind_addr argument is an Option containing a string slice that specifies the
-    /// local address the socket should bind to. If it is None the method will bind
-    /// to a random local address.
+    /// Returns the socket that sends traffic back to the client at addr, creating it if it
+    /// doesn't exist yet. A new socket is bound to bind_addr (with SO_REUSEADDR), or to a random
+    /// local address if bind_addr is None, and connected to addr.
     /// # Returns
-    /// On success the unit type () is returned. Otherwise a RelayPortError error is returned.
+    /// On success the socket is returned. Otherwise a RelayPortError error is returned.
     ///
     async fn new_client_connection(
         &self,

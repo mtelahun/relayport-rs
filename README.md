@@ -8,57 +8,51 @@ Fast and easy abstraction for proxying TCP and UDP ports.
 [![docs.rs](https://img.shields.io/docsrs/relayport-rs)](https://docs.rs/crate/relayport-rs/latest)
 
 This library simplifies the creation of asynchronous TCP/UDP proxies from rust applications. The only limit on the number
-of proxies are the resources available on the system on which it is run. This library depends on [tokio](https::/tokio.rs)
+of proxies are the resources available on the system on which it is run. This library depends on [tokio](https://tokio.rs)
 for its runtime.
 
 ## Use
 To use this library in your own package add the following to your Cargo.toml:
 
-```
+```toml
 [dependencies]
-relayport_rs = "0.5.0"
+relayport-rs = "0.5.0"
 ```
 
 ## Example
 A simple program to proxy web traffic to a server might look like this:
-```
-use std::error::Error;
-use relayport_rs::command::RelayCommand;
-use relayport_rs::RelayPortError;
-use relayport_rs::RelayTcpSocket;
+```rust,no_run
+use relayport_rs::{RelayPortError, RelayTcpSocket};
 use tokio::sync::broadcast;
 
 #[tokio::main]
 pub async fn main() -> Result<(), RelayPortError> {
-    // The relay expects a broadcast channel on which to listen for shutdown commands
-    let (tx, rx) = broadcast::channel(16);
+    // The relay expects a broadcast channel on which to listen for shutdown commands.
+    // Keep the sender alive: if every sender is dropped, run() returns an error.
+    let (_tx, rx) = broadcast::channel(16);
 
     // build a relay with a listener TCP socket
-    let relay = RelaySocket::build()
+    let relay = RelayTcpSocket::build()
         .set_so_reuseaddr(true)
         .set_tcp_nodelay(true)
         .bind("127.0.0.1:8080")?
         .listen()?;
 
-    // this will never return unless it encounters an error
-    relay
-        .run("127.0.0.1:80", &rx)
-        .await
+    // this will not return unless it receives a shutdown command or encounters an error
+    relay.run("127.0.0.1:80", &rx).await
 }
 ```
 
 This example proxies DNS ports, which use UDP:
-```
-use std::error::Error;
-use relayport_rs::command::RelayCommand;
-use relayport_rs::RelayPortError;
-use relayport_rs::RelayUdpSocket;
+```rust,no_run
+use relayport_rs::{RelayPortError, RelayUdpSocket};
 use tokio::sync::broadcast;
 
 #[tokio::main]
 pub async fn main() -> Result<(), RelayPortError> {
-    // The relay expects a broadcast channel on which to listen for shutdown commands
-    let (tx, rx) = broadcast::channel(16);
+    // The relay expects a broadcast channel on which to listen for shutdown commands.
+    // Keep the sender alive: if every sender is dropped, run() returns an error.
+    let (_tx, rx) = broadcast::channel(16);
 
     // build a relay with a UDP socket
     let udp_relay = RelayUdpSocket::build()
@@ -66,11 +60,8 @@ pub async fn main() -> Result<(), RelayPortError> {
         .bind("127.0.0.1:10080")
         .await?;
 
-    // this will never return unless it encounters an error
-    udp_relay
-        .run("1.1.1.1:53", &rx)
-        .await
-        .expect("failed to start relay");
+    // this will not return unless it receives a shutdown command or encounters an error
+    udp_relay.run("1.1.1.1:53", &rx).await
 }
 ```
 
@@ -84,8 +75,8 @@ pub async fn main() -> Result<(), RelayPortError> {
 
 `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
-To insure it was installed correctly type the following commands and make sure you get a successful output:
-```
+To ensure it was installed correctly type the following commands and make sure you get a successful output:
+```sh
 rustc --version
 cargo --version
 ```

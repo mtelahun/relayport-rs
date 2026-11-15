@@ -65,8 +65,8 @@ impl RelaySocket {
 impl RelaySocketBuilder {
     /// Binds a TCP socket to addr.
     ///
-    /// The addr argument must be string slice that can be converted into a local addresss and port. Unlike
-    /// its [RelayUdpSocket] counterpart this method is synchronous.
+    /// The addr argument must be string slice that can be converted into a local address and port. Unlike
+    /// its [UDP counterpart](crate::relay::udp::RelaySocketBuilder::bind) this method is synchronous.
     ///
     /// # Returns
     /// This method returns a [BoundRelaySocket] wrapped in a [Result]. If the operation fails for any reason the
@@ -149,7 +149,7 @@ impl RelaySocketBuilder {
     /// Change the SO_REUSEADDR option on the TCP socket. If reuseaddr is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the reuseaddr argument.
+    /// The [RelaySocketBuilder] object with the configuration set according to the reuseaddr argument.
     ///
     /// ```
     /// use relayport_rs::{RelayPortError, RelayTcpSocket};
@@ -173,7 +173,7 @@ impl RelaySocketBuilder {
     /// Change the TCP_NODELAY option on the TCP socket. If nodelay is `true` the option will
     /// be set on the created socket. If it is `false` the option will be disabled.
     /// # Returns
-    /// The [RelayTcpSocketBuilder] obeject with the configuration set according to the nodelay argument.
+    /// The [RelaySocketBuilder] object with the configuration set according to the nodelay argument.
     ///
     /// ```
     /// use relayport_rs::{RelayPortError, RelayTcpSocket};
@@ -199,7 +199,7 @@ impl RelaySocketBuilder {
         self.0.so_reuseaddr
     }
 
-    /// Get the builder configuratioin for setting TCP_NODELAY on the TCP socket.
+    /// Get the builder configuration for setting TCP_NODELAY on the TCP socket.
     pub fn tcp_nodelay(&self) -> bool {
         self.0.tcp_nodelay
     }
@@ -255,15 +255,15 @@ impl BoundRelaySocket {
 }
 
 impl RelayListener {
-    /// Start relaying incomming TCP traffic to the remote peer.
+    /// Start relaying incoming TCP traffic to the remote peer.
     ///
     /// Wait for a connection to come in on a RelayListener, accept the connection, and
     /// begin relaying traffic from the client to the remote peer and vice versa. After an
-    /// incomming connection is accepted this method will spawn a [tokio::task] to handle relaying
+    /// incoming connection is accepted this method will spawn a [tokio::task] to handle relaying
     /// traffic. The spawned task will be a bi-directional relay that will handle traffic
     /// in both directions asynchronously. The caller is responsible for creating a
-    /// [tokio::sync::broadcast] chanel and passing the receiver half to this method. The
-    /// chanel can be used by the caller to send [RelayCommand] objects to the spawned task.
+    /// [tokio::sync::broadcast] channel and passing the receiver half to this method. The
+    /// channel can be used by the caller to send [RelayCommand] objects to the spawned task.
     /// Currently, the only command supported by the library is a shutdown command to instruct
     /// the task to close the TCP socket and exit cleanly.
     ///
@@ -296,7 +296,7 @@ impl RelayListener {
     ///     });
     ///
     ///     // Do other work
-    ///     tokio::time::sleep(std::time::Duration::from_secs(60));
+    ///     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     ///
     ///     // send the task a shutdown command so it exits cleanly
     ///     tx.send(RelayCommand::Shutdown)?;
