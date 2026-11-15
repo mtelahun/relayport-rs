@@ -128,3 +128,44 @@ async fn spawn_tcp_relay(
 
     (client, server)
 }
+
+#[tokio::test]
+async fn tcp_relay_serves_concurrent_connections() {
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    // Echo server that accepts any number of connections.
+    let server = TcpListener::bind("127.0.0.1:22100").await.unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = server.accept().await.unwrap();
+            tokio::spawn(async move {
+                let (mut r, mut w) = stream.split();
+                let _ = tokio::io::copy(&mut r, &mut w).await;
+            });
+        }
+    });
+    let (tx, rx) = broadcast::channel(1);
+    RelayTcp::new("127.0.0.1:12099", "127.0.0.1:22100")
+        .spawn(rx)
+        .await;
+
+    // The first connection stays open for the rest of the test.
+    let mut first = TcpStream::connect("127.0.0.1:12099").await.unwrap();
+    first.write_all(b"first").await.unwrap();
+    let mut buf = [0u8; 6];
+    first.read_exact(&mut buf[..5]).await.unwrap();
+    assert_eq!(&buf[..5], b"first");
+
+    // A second connection must be relayed while the first is still open.
+    let mut second = TcpStream::connect("127.0.0.1:12099").await.unwrap();
+    second.write_all(b"second").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), second.read_exact(&mut buf))
+        .await
+        .expect("second connection was not relayed while the first was open")
+        .unwrap();
+    assert_eq!(&buf, b"second");
+
+    tx.send(RelayCommand::Shutdown).unwrap();
+}
